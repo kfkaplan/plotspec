@@ -1,0 +1,15 @@
+#um	Line Label, most wavelengths from physics.nist.gov energy levels, wavelengths are vaccume, maybe switch to air later once I figure it out
+1.4644	[I IV]
+1.5207	[Sb III]
+1.5973	[Rb IV]
+1.72025	[Cd IV]
+1.9455	[Rb VI]#Can confuse with an H I line
+1.5884880	H I 4-14
+2.1048	[Te III]
+2.1216	H2 1-0 S(1)
+2.166120	H I 4-7
+2.1932	[Ge VI]
+2.1986	[Kr III]
+2.2865	[Se IV]
+1.9646	[Si VI]
+2.4814	[Si VII]
