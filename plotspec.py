@@ -374,7 +374,8 @@ class spec1d:
 					plot(wave, subtracted_flux, label='Science Target - Continuum Subtracted', color='black')
 					plot(wave, old_flux, label='Science Target - Continuum Not Subtracted', color='blue')
 					plot(wave, median_result_1d, label='Continuum Subtraction', color='green')
-				else #Else just plot the order
+					first_order = False #Now that we are done, just plot the ldata for all the other orders without making a long legend
+				else: #Else just plot the order
 					plot(wave, subtracted_flux, color='black')
 					plot(wave, old_flux, color='blue')
 					plot(wave, median_result_1d, color='green')
@@ -514,8 +515,8 @@ class spec2d:
 		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
 			[low_wave_limit, high_wave_limit]  = [bottleneck.nanmin(combospec.wave), bottleneck.nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
 			wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
-			goodpix_combospec = combospec.wave >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
-			goodpix_next_order = self.orders[i+1].wave < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
+			goodpix_combospec = combospec.wave[0,:] >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
+			goodpix_next_order = self.orders[i+1].wave[0,:] < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
 			combospec.wave = concatenate([self.orders[i+1].wave[:, goodpix_next_order], combospec.wave[:, goodpix_combospec] ], axis=1) #Stitch wavelength arrays together
 			combospec.flux = concatenate([self.orders[i+1].flux[:, goodpix_next_order], combospec.flux[:, goodpix_combospec] ], axis=1)#Stitch flux arrays together
 		self.combospec = combospec #save the orders all stitched together
