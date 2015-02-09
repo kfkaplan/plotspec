@@ -408,7 +408,7 @@ class spec1d:
 		clf() #Clear plot
 		min_wave  = min(self.combospec.wave) #Find maximum wavelength
 		max_wave  = max(self.combospec.wave) #Find minimum wavelength
-		max_flux = bottleneck.nanmax(sci.flux, axis=0)
+		max_flux = bottleneck.nanmax(self.combospec.flux, axis=0)
 		total_wave_coverage = max_wave - min_wave #Calculate total wavelength coverage
 		if (model != '') and (model != 'none'): #Load model for comparison if needed
 			model_wave, model_flux = loadtxt(model, unpack=True) #Read in text file of model with format of two columns with wave <tab> flux
@@ -420,24 +420,24 @@ class spec1d:
 			wave_range = [min_wave + total_wave_coverage*(float(j)/float(rows)), #Calculate wavelength range for a single row
 						min_wave + total_wave_coverage*(float(j+1)/float(rows))]
 			subplot(rows,1,j+1) #split into multiple plots
-			sci_in_range = logical_and(sci.wave > wave_range[0], sci.wave < wave_range[1]) #Find portion of spectrum in single row
+			sci_in_range = logical_and(self.combospec.wave > wave_range[0], self.combospec.wave < wave_range[1]) #Find portion of spectrum in single row
 			sub_linelist = linelist.parse(wave_range[0], wave_range[1]) #Find lines in single row
-			wave_to_interp = append(insert(sci.wave, 1.0, 0.0), 3.0) #Interpolate IGRINS spectrum to allow line labels to be placed in correct position in figure
-			flux_to_interp = append(insert(sci.flux, 0, 0.0), 0.0)
+			wave_to_interp = append(insert(self.combospec.wave, 1.0, 0.0), 3.0) #Interpolate IGRINS spectrum to allow line labels to be placed in correct position in figure
+			flux_to_interp = append(insert(self.combospec.flux, 0, 0.0), 0.0)
 			sci_flux_interp = interp1d(wave_to_interp, flux_to_interp) #Get interpolation object of science spec.
 			sub_linelist.flux = sci_flux_interp(sub_linelist.wave) #Get height of spectrum for each individual line
 			for i in xrange(len(sub_linelist.wave)):#Output label for each emission lin
 				other_lines = abs(sub_linelist.wave - sub_linelist.wave[i]) < 0.00001 #Window (in microns) to check for regions of higher flux nearby so only the brightest lines (in this given range) are labeled.
 				if sub_linelist.flux[i] > max_flux*threshold and bottleneck.nanmax(sub_linelist.flux[other_lines], axis=0) == sub_linelist.flux[i]: #if line is the highest of all surrounding lines within some window
 					if sub_linelist.label[i] == '{OH}': #If OH lines appear in line list.....
-						mask_these_pixels = abs(sci.wave-sub_linelist.wave[i]) < 0.00006 #Create mask of OH lines...
-						sci.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
+						mask_these_pixels = abs(self.combospec.wave-sub_linelist.wave[i]) < 0.00006 #Create mask of OH lines...
+						self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
 						#plot([linelist_wave[i], linelist_wave[i]], [linelist_flux[i]+max_flux*0.025, max_flux*0.92], ':', color='gray')
 						#text(linelist_wave[i], linelist_flux[i]+max_flux*0.02, '$\oplus$', rotation=90, fontsize=9, verticalalignment='bottom', horizontalalignment='center', color='black') 
 					else:   #If no OH lines found, plot lines on figure
 						plot([sub_linelist.wave[i], sub_linelist.wave[i]], [sub_linelist.flux[i], sub_linelist.flux[i] + max_flux*0.065], ':', color='black') #Plot location of line as a dotted line a little bit above the spectrum
 						text(sub_linelist.wave[i], sub_linelist.flux[i] +  max_flux*0.073, sub_linelist.label[i], rotation=90, fontsize=9.5, verticalalignment='bottom', horizontalalignment='center', color='black')  #Label line with text
-			plot(sci.wave[sci_in_range], sci.flux[sci_in_range], color='blue') #Plot actual spectrum
+			plot(self.combospec.wave[sci_in_range], self.combospec.flux[sci_in_range], color='blue') #Plot actual spectrum
 			if (model != '') and (model != 'none'): #Load model for comparison if needed
 				model_in_range = logical_and(model_wave > wave_range[0], model_wave < wave_range[1]) #Find portion of model spectrum in a given row 
 				plot(model_wave[model_in_range], model_flux[model_in_range], color='red') #Plot model spectrum
