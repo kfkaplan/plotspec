@@ -6,13 +6,18 @@
 from astropy.io import fits #Use astropy for processing fits files
 from pylab import *  #Always import pylab because we use it for everything
 from scipy.interpolate import interp1d, splev, UnivariateSpline #For interpolating
-import bottleneck #Library to speed up things
+
 #from scipy.ndimage import zoom #Was used for continuum subtraction at one point, commented out for now
 import ds9 #For scripting DS9
 import copy #Allow objects to be copied
 #from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
+from matplotlib.backends.backend_pdf import PdfPages
+try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
+	from bottleneck import * #Library to speed up some numpy routines
+except ImportError:
+	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
 
 
 #Global variables, set after installing plotspec.py
@@ -21,8 +26,9 @@ scratch_path = '/Volumes/IGRINS_data/scratch/' #Define path for saving temporary
 data_path = pipeline_path + 'outdata/'
 calib_path = pipeline_path + 'calib/primary/'
 OH_line_list = 'OH.dat' #Read in OH line list
-default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
-velocity_range = 60.0 # +/- km/s for interpolated velocity grid
+#default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
+default_wave_pivot = 0.75 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
+velocity_range = 100.0 # +/- km/s for interpolated velocity grid
 velocity_res = 1.0 #Resolution of velocity grid
 c = 2.99792458e5 #Speed of light in km/s
 block = 300 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
@@ -165,8 +171,8 @@ class position_velocity:
 		slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
 		wave_pixels = spec2d.wave[0,:] #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
-		min_wave  = bottleneck.nanmin(wave_pixels) #Minimum wavelength
-		max_wave = bottleneck.nanmax(wave_pixels) #maximum wavelength
+		min_wave  = nanmin(wave_pixels) #Minimum wavelength
+		max_wave = nanmax(wave_pixels) #maximum wavelength
 		#wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
 		x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
 		interp_velocity = arange(-velocity_range, velocity_range, velocity_res) #Velocity grid to interpolate each line onto
@@ -183,10 +189,10 @@ class position_velocity:
 			gridded_result_1d = interp_obj_1d(interp_velocity) #PV diagram velocity gridded
 			gridded_result_2d = interp_obj_2d(interp_velocity) #PV diagram velocity gridded
 			if not s2n: #Check that 1D data is not an array of S/N and actually is flux
-				scale_flux_1d = bottleneck.nansum(ungridded_result_1d) / bottleneck.nansum(gridded_result_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+				scale_flux_1d = nansum(ungridded_result_1d) / nansum(gridded_result_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
 			else: #Or scale signal to noise per pixel to S/N per resolution element (for comparing to the ETC, for example)
 				scale_flux_1d = sqrt(3.3) 
-			scale_flux_2d = bottleneck.nansum(ungridded_result_2d) / bottleneck.nansum(gridded_result_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+			scale_flux_2d = nansum(ungridded_result_2d) / nansum(gridded_result_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
 			flux.append(gridded_result_1d *  scale_flux_1d) #Append 1D flux array with line
 			if 'pv' not in locals(): #First line start datacube for 2D spectrum
 				pv = gridded_result_2d.transpose() * scale_flux_2d #Start datacube for 2D PV spectra
@@ -208,7 +214,7 @@ class position_velocity:
 		ds9.set('zoom to fit') #Zoom PV diagram to fit ds9 window
 		ds9.set('zoom 0.9') #Zoom out a little bit to see the coordinate grid
 		ds9.set('scale log') #Set view to log scale
-		ds9.set('scale ZMax') #Set scale limits to Zmax, looks okay
+		ds9.set('scale Zscale') #Set scale limits to Zscale, looks okay
 		ds9.set('grid on')  #Turn on coordinate grid to position velocity coordinates
 		ds9.set('grid type publication') #Set to the more aesthetically pleasing publication type grid
 		ds9.set('grid system wcs') #Set to position vs. velocity coordinates
@@ -252,9 +258,32 @@ class position_velocity:
 		title = label_string + '   ' + wave_string + ' $\mu$m'
 		ds9.set('cube '+str(i)) #Go to line in ds9 specified by user in 
 		self.plot_1d_velocity(i-1, title = title)
+	def make_1D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 1D lines in a single PDF file
+		with PdfPages(scratch_path + pdf_file_name) as pdf: #Make a multipage pd
+			for i in xrange(len(self.flux)):
+				label_string = self.label[i]
+				wave_string = "%12.5f" % self.lab_wave[i]
+				title = label_string + '   ' + wave_string + ' $\mu$m'
+				self.plot_1d_velocity(i, title=title) #Make 1D plot postage stamp of line
+				pdf.savefig() #Save as a page in a PDF file
+	def make_2D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 2D lines in a single PDF file
+		#figure(figsize=(2,1), frameon=False)
+		with PdfPages(scratch_path + pdf_file_name) as pdf: #Make a multipage pd
+			for i in xrange(len(self.flux)):
+				label_string = self.label[i]
+				wave_string = "%12.5f" % self.lab_wave[i]
+				title = label_string + '   ' + wave_string + ' $\mu$m'
+				#self.plot_1d_velocity(i, title=title) #Make 1D plot postage stamp of line
+				frame = gca() #Turn off axis number labels
+				frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
+				frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
+				ax = subplot(111)
+				suptitle(title)
+				imshow(self.pv[i,:,:], cmap='gray')
+				pdf.savefig() #Save as a page in a PDF file
 	def plot_1d_velocity(self, line_index, title=''): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
 		clf() #Clear plot space
-		max_flux = bottleneck.nanmax(self.flux[line_index], axis=0) #Find maximum flux in slice of spectrum
+		max_flux = nanmax(self.flux[line_index], axis=0) #Find maximum flux in slice of spectrum
 		plot(self.velocity, self.flux[line_index], color='black') #Plot 1D spectrum slice
 		plot([0,0], [0,2*max_flux], '--') #Plot velocity zero point
 		xlim([-velocity_range, velocity_range]) #Set xrange to be +/- the velocity range set for the PV diagrams
@@ -293,8 +322,8 @@ class position_velocity:
 	def normalize(self, line): #Normalize all PV diagrams by a single line
 		self.pv = self.pv / self.getline(line)
 	def basic_flux(self, x_range, y_range):
-		sum_along_x = bottleneck.nansum(self.pv[:, y_range[0]:y_range[1], x_range[0]:x_range[1]], axis=2) #Collapse along velocity space
-		total_sum = bottleneck.nansum(sum_along_x, axis=1) #Collapse along slit space
+		sum_along_x = nansum(self.pv[:, y_range[0]:y_range[1], x_range[0]:x_range[1]], axis=2) #Collapse along velocity space
+		total_sum = nansum(sum_along_x, axis=1) #Collapse along slit space
 		return(total_sum) #Return the integrated flux found for each line in the box defined by the user
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for reading in analyzing spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -385,7 +414,7 @@ class spec1d:
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
 		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
-			[low_wave_limit, high_wave_limit]  = [bottleneck.nanmin(combospec.wave), bottleneck.nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
+			[low_wave_limit, high_wave_limit]  = [nanmin(combospec.wave), nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
 			wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
 			goodpix_combospec = combospec.wave >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
 			goodpix_next_order = self.orders[i+1].wave < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
@@ -408,11 +437,11 @@ class spec1d:
 		clf() #Clear plot
 		min_wave  = min(self.combospec.wave) #Find maximum wavelength
 		max_wave  = max(self.combospec.wave) #Find minimum wavelength
-		max_flux = bottleneck.nanmax(self.combospec.flux, axis=0)
+		max_flux = nanmax(self.combospec.flux, axis=0)
 		total_wave_coverage = max_wave - min_wave #Calculate total wavelength coverage
 		if (model != '') and (model != 'none'): #Load model for comparison if needed
 			model_wave, model_flux = loadtxt(model, unpack=True) #Read in text file of model with format of two columns with wave <tab> flux
-			model_max_flux = bottleneck.nanmax(model_flux[logical_and(model_wave > min_wave, model_wave < max_wave)], axis=0) #find tallest line in model
+			model_max_flux = nanmax(model_flux[logical_and(model_wave > min_wave, model_wave < max_wave)], axis=0) #find tallest line in model
 			normalize_model = max_flux / model_max_flux #normalize tallest line in model to the tallest line in IGRINS data
 			model_flux = normalize_model * model_flux #Apply normalization to model spectrum to match IGRINS spectrum
 		#fig = figure(figsize=(15,11)) #Set proportions
@@ -428,7 +457,7 @@ class spec1d:
 			sub_linelist.flux = sci_flux_interp(sub_linelist.wave) #Get height of spectrum for each individual line
 			for i in xrange(len(sub_linelist.wave)):#Output label for each emission lin
 				other_lines = abs(sub_linelist.wave - sub_linelist.wave[i]) < 0.00001 #Window (in microns) to check for regions of higher flux nearby so only the brightest lines (in this given range) are labeled.
-				if sub_linelist.flux[i] > max_flux*threshold and bottleneck.nanmax(sub_linelist.flux[other_lines], axis=0) == sub_linelist.flux[i]: #if line is the highest of all surrounding lines within some window
+				if sub_linelist.flux[i] > max_flux*threshold and nanmax(sub_linelist.flux[other_lines], axis=0) == sub_linelist.flux[i]: #if line is the highest of all surrounding lines within some window
 					if sub_linelist.label[i] == '{OH}': #If OH lines appear in line list.....
 						mask_these_pixels = abs(self.combospec.wave-sub_linelist.wave[i]) < 0.00006 #Create mask of OH lines...
 						self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
@@ -449,6 +478,12 @@ class spec1d:
 			minorticks_on() #Show minor tick marks
 			gca().set_autoscale_on(False) #Turn off autoscaling
 		show() #Show spectrum
+	def mask_OH(self): #Mask OH lines, use only after processing and combinging spectrum to make a cleaner 1D spectrum
+		OH_lines = lines(OH_line_list, delta_v=0.0) #Load OH line list
+		parsed_OH_lines = OH_lines.parse( min(self.combospec.wave), max(self.combospec.wave))
+		for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
+			mask_these_pixels = abs(self.combospec.wave-parsed_OH_lines.wave[i]) < 0.00006 #Create mask of OH lines...
+			self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
 
 
 
@@ -473,7 +508,7 @@ class spec2d:
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
 			old_flux =  copy.deepcopy(order.flux)
 			#stop()
-			trace = bottleneck.nanmedian(old_flux, axis=1) #Get trace of continuum from median of whole order
+			trace = nanmedian(old_flux, axis=1) #Get trace of continuum from median of whole order
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
 			max_y = where(trace == max(trace))[0][0] #Find peak of trace
 			norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
@@ -513,7 +548,7 @@ class spec2d:
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
 		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
-			[low_wave_limit, high_wave_limit]  = [bottleneck.nanmin(combospec.wave), bottleneck.nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
+			[low_wave_limit, high_wave_limit]  = [nanmin(combospec.wave), nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
 			wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
 			goodpix_combospec = combospec.wave[0,:] >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
 			goodpix_next_order = self.orders[i+1].wave[0,:] < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
@@ -537,7 +572,7 @@ class spec2d:
 		self.show_labels() #Load labels
 		ds9.set('zoom to fit')
 		ds9.set('scale log') #Set view to log scale
-		ds9.set('scale ZMax') #Set scale limits to Zmax, looks okay
+		ds9.set('scale ZScale') #Set scale limits to Zscale, looks okay
 		ds9.set('frame lock image')
 		#Pause for viewing if user specified
 		if pause:
@@ -550,8 +585,8 @@ class spec2d:
 		regions = [] #Create list to store strings for creating a DS9 region file
 		wave_pixels = self.combospec.wave[0,:] #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
-		min_wave  = bottleneck.nanmin(wave_pixels, axis=0) #Minimum wavelength
-		max_wave = bottleneck.nanmax(wave_pixels, axis=0) #maximum wavelength
+		min_wave  = nanmin(wave_pixels, axis=0) #Minimum wavelength
+		max_wave = nanmax(wave_pixels, axis=0) #maximum wavelength
 		wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
 		x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
 		top_y = str(self.slit_pixel_length)
@@ -666,10 +701,10 @@ def robust_median_filter(input_flux, size = half_block):
 	x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction
 	if ndim(flux) == 2: #Run this loop for 2D
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
-			median_result[i] = bottleneck.nanmedian(flux[:,x_left[i]:x_right[i]]) #Calculate median between x_left and x_right for a given pixel
+			median_result[i] = nanmedian(flux[:,x_left[i]:x_right[i]]) #Calculate median between x_left and x_right for a given pixel
 	else: #Run this loop for 1D
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
-			median_result[i] = bottleneck.nanmedian(flux[x_left[i]:x_right[i]])  #Calculate median between x_left and x_right for a given pixel
+			median_result[i] = nanmedian(flux[x_left[i]:x_right[i]])  #Calculate median between x_left and x_right for a given pixel
 	return median_result
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~ Various commands ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
