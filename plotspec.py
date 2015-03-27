@@ -902,7 +902,8 @@ class spectrum:
 	def __init__(self, wave, flux, noise=[]): #Initialize spectrum by reading in two columned file 
 		self.wave = wave #Set up wavelength array 
 		self.flux = flux #Set up flux array
-		if "noise" in locals(): #If user specifies a noise
+		#if "noise" in locals(): #If user specifies a noise
+		if len(noise) >= 1:
 			self.noise = noise #Save it like flux
 			self.s2n = flux / noise
 		else:
