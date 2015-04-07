@@ -3,41 +3,60 @@
 #start as test_new_plotspec.py
 
 #Import libraries
+import os #Import OS library for checking and creating directories
 from astropy.io import fits #Use astropy for processing fits files
+from astropy.modeling import models, fitting #import the astropy model fitting package
 import pyregion #For reading in regions from DS9 into python
 from pylab import *  #Always import pylab because we use it for everything
-from scipy.interpolate import interp1d, splev, UnivariateSpline #For interpolating
+from scipy.interpolate import interp1d, UnivariateSpline #For interpolating
 #from scipy.ndimage import zoom #Was used for continuum subtraction at one point, commented out for now
 import ds9 #For scripting DS9
-import h2 #For dealing with H2 spectra
+#import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
 #from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
-from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
 	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
 
-
-#Global variables, set after installing plotspec.py
-pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
-scratch_path = '/Volumes/IGRINS_data/scratch/' #Define path for saving temporary files
-data_path = pipeline_path + 'outdata/'
-calib_path = pipeline_path + 'calib/primary/'
-OH_line_list = 'OH.dat' #Read in OH line list
+#Global variables user should set
+pipeline_path = '/Volumes/IGRINS_data/plp-testing/'#Define path to pipeline directory where reduced data is stored
+#pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
+save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files
 read_variance = True #Boolean that tells code to use variance for 2D maps (or not) NOTE: This is an experimental feature and not yet implemented in the official pipeline.
 #default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
 default_wave_pivot = 0.75 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
 velocity_range =100.0 # +/- km/s for interpolated velocity grid
 velocity_res = 1.0 #Resolution of velocity grid
-c = 2.99792458e5 #Speed of light in km/s
-slit_length = 62 #Number of pixels along slit in both H and K bands
+#slit_length = 62 #Number of pixels along slit in both H and K bands
+slit_length = 61 #Number of pixels along slit in both H and K bands
 block = 300 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
+
+#Global variables, should remain untouched
+data_path = pipeline_path + 'outdata/'
+calib_path = pipeline_path + 'calib/primary/'
+OH_line_list = 'OH_Rousselot_2000.dat' #Read in OH line list
+c = 2.99792458e5 #Speed of light in km/s
 half_block = block / 2 #Half of the block used for running median smoothing
 
-
+#~~~~~~~~~~~~~~~~~~~~~~~~Code for storing information on saved data directories under save_path~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+class save_class: #Class stores information on what path to save files to
+	def __init__(self):
+		self.object = 'scratch' #If no name is set, by default save in the "scratch" directory
+		self.set_path()
+	def name(self, input): #User can change name of science target in script by saying 'save.name('NGC XXXX')
+		self.object = input.replace(' ', '_')
+		self.set_path()
+	def set_path(self): #Update path to directory to save results in
+		self.path = save_path + self.object + '/'
+		if not os.path.exists(self.path): #Check if directory exists
+			print 'Directory '+ self.path+ ' does not exist.  Making new directory.'
+			os.mkdir(self.path) #If path does not exist, make directory
+		
+save = save_class() #Create object user can change the name to
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for modifying spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -188,12 +207,49 @@ def telluric_and_flux_calib(sci, std, std_flattened, quality_cut = False, show_p
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
-#Attempt to corrrect OH residuals by taking the difference between two sky frames and adding it to the science frame
-def OH_correction(sci, sky):
-	for i in xrange(sci.n_orders): #Loop through each order
-		sci.orders[i].flux = sci.orders[i].flux - sky.orders[i].flux #Apply correction
-	sci.combine_orders()  #Combine now continuum subracted orders into one long slit spectrum
-	return sci
+##Attempt to corrrect OH residuals by taking the difference between two sky frames and adding it to the science frame
+#def OH_correction(sci, sky):
+	#for i in xrange(sci.n_orders): #Loop through each order
+		#sci.orders[i].flux = sci.orders[i].flux - sky.orders[i].flux #Apply correction
+	#sci.combine_orders()  #Combine now continuum subracted orders into one long slit spectrum
+	#return sci
+def OH_correction(sky):
+	OH_lines = lines(OH_line_list) #Create OH line list object
+	clf()
+	for order in sky.orders:
+	#for i in xrange(sky.n_orders): #Loop through each order of sky spectrum
+		#found_OH_lines = OH_lines.parse(min(order.wave), max(order.wave)) #Search for possible OH lines in this order
+		#interpolate_order = interp1d(order.wave, order.flux) #Create interpolation object for OH lines
+		#line_peaks_guess = interpolate_order(found_OH_lines.wave) #Guess flux of line peaks for fitting amplitude of 1D gaussians
+		#good_lines = isfinite(line_peaks_guess)
+		#n_found_lines = len(line_peaks_guess[good_lines])
+		#all_fits = zeros(len(order.wave)) #Set up blank array to put the fits onto
+		#for j in xrange(n_found_lines):
+			#g_init =  models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5)
+			##fit_g = fitting.LevMarLSQFitter()
+			##fit_g = fitting.SimplexLSQFitter()
+			#fit_g = fitting.SLSQPLSQFitter()
+			#g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
+			#all_fits = all_fits + g(order.wave)
+		##stop()
+		##g_init = models.Gaussian1D(amplitude=line_peaks_guess[good_lines][0], mean=found_OH_lines.wave[good_lines][0], stddev=2e-5) #Set up first model
+		##if n_found_lines > 1: #If more than one model is needed
+		##	for j in range(1, n_found_lines): #Loop through each model
+		##		g_init = g_init + models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5) #add another model to the now compound model
+		###fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
+		###fit_g = fitting.SLSQPLSQFitter()
+		##fit_g = fitting.SimplexLSQFitter()
+		##g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
+		goodpix = isfinite(order.flux)
+		smooth_fit = UnivariateSpline(order.wave[goodpix], order.flux[goodpix], s=1000, k=3)
+		smoothed_flux = smooth_fit(order.wave)
+		plot(order.wave, order.flux, color='Black') #Test plotting the sky data
+		plot(order.wave, smoothed_flux, color='Red') 
+		plot(order.wave, order.flux - smoothed_flux, color='Blue')
+	stop()
+		
+		#for j in xrange(len(found_OH_lines.label)): #Loop through each found OH line
+			
 
 
 
@@ -220,11 +276,11 @@ class position_velocity:
 			ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
 			if read_variance: #If user specifies read in the 2D variance map
 				ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
-			interp_flux_1d= interp1d(ungridded_velocities, ungridded_flux_1d, kind='slinear', bounds_error=False) #Create interp. object for 1D flux
-			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='slinear', bounds_error=False) #Create interp obj for 2D flux
-			interp_variance_1d= interp1d(ungridded_velocities, ungridded_variance_1d, kind='slinear', bounds_error=False) #Create interp obj for 1D variance
+			interp_flux_1d= interp1d(ungridded_velocities, ungridded_flux_1d, kind='linear', bounds_error=False) #Create interp. object for 1D flux
+			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
+			interp_variance_1d= interp1d(ungridded_velocities, ungridded_variance_1d, kind='linear', bounds_error=False) #Create interp obj for 1D variance
 			if read_variance: #If user specifies read in the 2D variance map
-				interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='slinear', bounds_error=False) #Create interp obj for 2D variance
+				interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			#ungridded_flux_1d = interp_flux_1d(ungridded_velocities) #PV diagram ungridded on origional pixels
 			#ungridded_flux_2d = interp_flux_2d(ungridded_velocities) #PV diagram ungridded on origional pixels
 			gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
@@ -271,21 +327,24 @@ class position_velocity:
 		pv = swapaxes(pv, 0, 2) #Flip axes around in cube so that it can later be saved as a fits file
 		if read_variance: #If user specifies read in 2D variance
 			var2d = swapaxes(var2d, 0, 2) #Flip axes around in cube so that it can later be saved as a fits file
+		else:
+			var2d = zeros(shape(self.pv)) #Create dummy variance map 
 		self.flux = flux #Save 1D PV fluxes
 		self.var1d = var1d #Save 1D PV variances
 		self.pv = pv #Save datacube of stack of 2D PV diagrams for each line
-		if read_variance: #If user specifies read in 2D variance
-			self.var2d = var2d #Save 2D PV variance
+		#if read_variance: #If user specifies read in 2D variance
+		self.var2d = var2d #Save 2D PV variance
 		self.velocity = interp_velocity #Save aray storing velocity grid all lines were interpolated onto
 		self.label = show_lines.label #Save line labels
 		self.lab_wave = show_lines.lab_wave #Save lab wavelengths for all the lines
 		self.wave = show_lines.wave #Save line wavelengths
+		self.n_lines = len(self.flux) #Count number of individual spectral lines lines stored in position velocity object
 		self.slit_pixel_length = slit_pixel_length #Store number of pixels along slit
 		self.s2n = s2n #Store boolean operator if spectrum is a S/N spectrum or not
 	def view(self, line='', wave=0.0,  pause = False, close = False, printlines=False): #Function loads 2D PV diagrams in DS9 and plots 1D diagrams
 		self.save_fits() #Save a fits file of the pv diagrams for opening in DS9
 		ds9.open() #Open DS9
-		ds9.show(scratch_path + 'pv.fits', new = False) #Load PV diagrams into DS9
+		ds9.show(save.path + 'pv.fits', new = False) #Load PV diagrams into DS9
 		#if read_variance:
 			#XXXXXXXXX
 		ds9.set('zoom to fit') #Zoom PV diagram to fit ds9 window
@@ -301,7 +360,7 @@ class position_velocity:
 		ds9.set('grid numerics color black') #Make numbers black for easier reading
 		if printlines: #If user sets printlines = True, list lines and their index in the command line
 			print 'Lines are....'
-			for i in xrange(len(self.label)): #Loop through each line
+			for i in xrange(self.n_lines): #Loop through each line
 				print i+1, self.label[i] #Print index and label for line in terminal
 		if line != '': #If user specifies line name, find index of that line and dispaly it
 			self.goline(line)
@@ -336,8 +395,8 @@ class position_velocity:
 		ds9.set('cube '+str(i)) #Go to line in ds9 specified by user in 
 		self.plot_1d_velocity(i-1, title = title)
 	def make_1D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 1D lines in a single PDF file
-		with PdfPages(scratch_path + pdf_file_name) as pdf: #Make a multipage pd
-			for i in xrange(len(self.flux)):
+		with PdfPages(save.path + pdf_file_name) as pdf: #Make a multipage pd
+			for i in xrange(self.n_lines):
 				label_string = self.label[i]
 				wave_string = "%12.5f" % self.lab_wave[i]
 				title = label_string + '   ' + wave_string + ' $\mu$m'
@@ -345,8 +404,8 @@ class position_velocity:
 				pdf.savefig() #Save as a page in a PDF file
 	def make_2D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 2D lines in a single PDF file
 		#figure(figsize=(2,1), frameon=False)
-		with PdfPages(scratch_path + pdf_file_name) as pdf: #Make a multipage pd
-			for i in xrange(len(self.flux)):
+		with PdfPages(save.path + pdf_file_name) as pdf: #Make a multipage pd
+			for i in xrange(self.n_lines):
 				label_string = self.label[i]
 				wave_string = "%12.5f" % self.lab_wave[i]
 				title = label_string + '   ' + wave_string + ' $\mu$m'
@@ -358,11 +417,12 @@ class position_velocity:
 				suptitle(title)
 				imshow(self.pv[i,:,:], cmap='gray')
 				pdf.savefig() #Save as a page in a PDF file
-	def plot_1d_velocity(self, line_index, title=''): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
-		clf() #Clear plot space
+	def plot_1d_velocity(self, line_index, title='', clear=True, fontsize=18): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
+		if clear: #Clear plot space, unless usser sets clear=False
+			clf() #Clear plot space
 		velocity = self.velocity
-		flux = self.flux[line_index]
-		noise = sqrt(self.var1d[line_index])
+		flux = self.flux[line_index] / 1e3 #Scale flux so numbers are not so big
+		noise = sqrt(self.var1d[line_index]) / 1e3
 		max_flux = nanmax(flux + noise, axis=0) #Find maximum flux in slice of spectrum
 		fill_between(velocity, flux - noise, flux + noise, facecolor = 'red')
 		plot(velocity, flux, color='black') #Plot 1D spectrum slice
@@ -379,12 +439,12 @@ class position_velocity:
 			#title(label)
 		#elif wave > 0.0:
 			#title("%12.5f" % wave + '$\mu$m')
-		xlabel('Velocity [km s$^{-1}$]', fontsize=18) #Label x axis
+		xlabel('Velocity [km s$^{-1}$]', fontsize=fontsize) #Label x axis
 		#if self.s2n:
 		#	ylabel('S/N per resolution element (~3.3 pixels)', fontsize=18) #Label y axis as S/N for S/N spectrum
 		#else:
 		#	ylabel('Relative Flux', fontsize=18) #Or just label y-axis as relative flux
-		ylabel('Relative Flux', fontsize=18) #Or just label y-axis as relative flux 
+		ylabel('Relative Flux', fontsize=fontsize) #Or just label y-axis as relative flux 
 		#draw()
 		#show()
 	def save_fits(self): #Save fits file of PV diagrams
@@ -397,7 +457,7 @@ class position_velocity:
 		pv_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
 		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
-		pv_file.writeto(scratch_path + 'pv.fits', clobber  = True) #Save fits file
+		pv_file.writeto(save.path + 'pv.fits', clobber  = True) #Save fits file
 		# if read_variance: #If variance is read in, save signal to noise fits file to also be displayed with pv diagram
 		# 	s2n_file = fits.PrimaryHDU(self.s2n) #Set up fits file object
 		# 	#Add WCS for linear interpolated velocity
@@ -420,12 +480,50 @@ class position_velocity:
 		sum_along_x = nansum(self.pv[:, y_range[0]:y_range[1], x_range[0]:x_range[1]], axis=2) #Collapse along velocity space
 		total_sum = nansum(sum_along_x, axis=1) #Collapse along slit space
 		return(total_sum) #Return the integrated flux found for each line in the box defined by the user
+	def fitgauss(self, auto=False): #Fit 1D gaussians to the 1D spectra and plot results
+		fwhm = []
+		quality_check_window = 15 #km/s window for quality check
+		fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
+		for i in xrange(self.n_lines): #Loop through each individual line
+			goodpix = isfinite(self.flux[i])
+			flux = self.flux[i][goodpix]
+			velocity = self.velocity[goodpix]
+			if len(flux) > 1:
+				g_init = models.Gaussian1D(amplitude=max(flux), mean=0.0, stddev=8.0) #Initialize gaussian model for this specific line, centered at 0 km/s with a first guess at the dispersion to be the spectral resolution
+				g = fit_g(g_init, velocity, flux) #Fit gaussian to line
+				g_mean = g.mean.value #Grab mean of gaussian fit
+				g_stddev = g.stddev.value
+				g_fwhm = g_stddev * 2.355
+				g_flux = g(velocity) #Grab 
+				g_residuals = flux - g_flux
+				check_pixels = abs(velocity - g_mean) <= quality_check_window
+				if g_fwhm > 0.0 and g_fwhm < 50.0 and sum(abs(g_residuals[check_pixels]))/sum(flux[check_pixels]) < 0.10: #Quality check, gausdsian fit should (mostly) get most of the residual line flux
+					#self.plot_1d_velocity(i+1) #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
+					fwhm.append(g_fwhm)
+					if auto:
+						print 'FWHM = ', g_fwhm
+					else:
+						clf() #Clear plot
+						plot(velocity, flux, color = 'blue')
+						plot(self.velocity, g(self.velocity), color = 'red')
+						plot(velocity, g_residuals, color = 'green')
+						#show()
+						#stop()
+						print 'mean = ', g_mean
+						print 'stddev = ', g_stddev
+						print 'FWHM = ', g_fwhm
+						raw_input('Press enter to continue')
+		print 'Number of lines with decent Gaussian fits = ', len(fwhm)
+		print 'All Lines Median FWHM = ', median(fwhm)
+		print 'All Lines Mean FWHM = ', mean(fwhm)
+		print 'All Lines std-dev FWHM = ', std(fwhm)
 
 
 
 
 class region: #Class for reading in a DS9 region file, and applying it to a position_velocity object
-	def __init__(self, pv, file='', background=''):
+	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0):
+		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		use_background_region = False
 		line_labels =  pv.label #Read out line labels
 		line_wave = pv.lab_wave #Read out (lab) line wavelengths
@@ -447,7 +545,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			else:
 				use_background_region = False
 		if background == 'all': #If user specifies to use whole 
-			use_background_regiuon = False
+			use_background_region = False
 		on_region = pyregion.open(file)  #Open region file for reading flux
 		on_mask = on_region.get_mask(shape = pv_shape) #Make mask around region file
 		on_patch_list, on_text_list = on_region.get_mpl_patches_texts() #Do some stuff
@@ -455,21 +553,20 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			off_region = pyregion.open(background) #Read in background region file
 			off_mask = off_region.get_mask(shape = pv_shape) #Set up mask
 			off_patch_list, off_text_list = off_region.get_mpl_patches_texts() #Do some stuff
-		figure(figsize=(3.0,1.5), frameon=False) #Set up figure check size
-		with PdfPages(scratch_path + 'flux_check.pdf') as pdf: #Make a multipage pdf
+		#figure(figsize=(4.0,3.0), frameon=False) #Set up figure check size
+		with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
 			line_flux = zeros(n_lines) #Set up array to store line fluxes
 			line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
 			line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
 			for i in xrange(n_lines): #Loop through each line
 				#subplot(n_subfigs, n_subfigs, i+1)
 				clf() #Clear plot field
+				ax = subplot(211) #Turn on "ax", set first subplot
 				frame = gca() #Turn off axis number labels
 				frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
 				frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
-				ax = subplot(111) #Turn on "ax"
 				on_data = pv_data[i,:,:][on_mask] #Find data inside the region for grabbing the flux
 				on_variance = pv_variance[i,:,:][on_mask]
-				sigma = 0.0
 				if use_background_region: #If a backgorund region is specified
 					off_data = pv_data[i,:,:][off_mask] #Find data in the background region for calculating the background
 					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
@@ -479,24 +576,31 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				if read_variance: #If user sets variance to be read in
 					line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
 					line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
-				imshow(pv_data[i,:,:], cmap='gray') #Save preview of line and region(s)
-				suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=6)
-				for p in on_patch_list: #Display DS9 regions in matplotlib
-				    ax.add_patch(p)
-				for t in on_text_list:
-				    ax.add_artist(t)
-				if use_background_region:
-					for p in off_patch_list:
-					    ax.add_patch(p)
-					for t in off_text_list:
-					    ax.add_artist(t)
-				pdf.savefig() #Add figure as a page in the pdf
+				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
+					imshow(pv_data[i,:,:], cmap='gray', interpolation='Nearest', origin='lower') #Save preview of line and region(s)
+					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=16)
+					#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
+					#xlabel('Velocity [km s$^{-1}$]')
+					ylabel('Along slit')
+					for p in on_patch_list: #Display DS9 regions in matplotlib
+						ax.add_patch(p)
+					for t in on_text_list:
+						ax.add_artist(t)
+					if use_background_region:
+						for p in off_patch_list:
+							ax.add_patch(p)
+						for t in off_text_list:
+							ax.add_artist(t)
+					ax = subplot(212) #Turn on "ax", set first subplot
+					pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
+					pdf.savefig() #Add figure as a page in the pdf
 		figure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
 		self.flux = line_flux #Save line fluxes
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
+		self.path = path #Save path to 
 	#def process_h2(self): #Create and store fluxes for H2 for this region, used mainly for testing, user should use this code in their own scripts to combine H2 lines from H and K bands
 		#h2_transitions = h2.make_line_list() #Set up H2 transition object
 		#h2_transitions.set_flux_in_region_obj(self.label, self.flux, self.s2n, self.sigma) #Read in fluxes for this region and assign them each to the appropriate H2 line
@@ -628,14 +732,14 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], fluxdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False): #Subtract continuum using robust running median
+	def subtract_continuum(self, show = False, size = half_block): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
 			first_order = True #Keep track of where we are in the so we only create the legend on the first order
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			old_flux = copy.deepcopy(order.flux) #Make copy of flux array so the original is not modified
 			wave = order.wave #Read n wavelength array
-			median_result_1d = robust_median_filter(old_flux) #Take a robust running median along the trace, this is the found continuum
+			median_result_1d = robust_median_filter(old_flux, size = size) #Take a robust running median along the trace, this is the found continuum
 			subtracted_flux = old_flux - median_result_1d #Apply continuum subtraction
 			if show: #If you want to watch the continuum subtraction
 				if first_order:  #If on the first order, make the legend along with plotting the order
@@ -754,7 +858,7 @@ class spec2d:
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
 	#This function applies continuum and background subtraction to one order
-	def subtract_continuum(self, show = False):
+	def subtract_continuum(self, show = False, size = half_block):
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
 			old_flux =  copy.deepcopy(order.flux)
@@ -763,7 +867,7 @@ class spec2d:
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
 			max_y = where(trace == max(trace))[0][0] #Find peak of trace
 			norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
-			median_result_1d = robust_median_filter(old_flux[max_y-1:max_y+1, :]) #Take a robust running median along the trace
+			median_result_1d = robust_median_filter(old_flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
 			median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
 			median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
 			subtracted_flux = old_flux - median_result_2d #Apply continuum subtraction
@@ -818,13 +922,13 @@ class spec2d:
 			spec_fits = fits.PrimaryHDU(self.combospec.s2n)
 		else: #You will view the flux
 			spec_fits = fits.PrimaryHDU(self.combospec.flux)
-		wave_fits.writeto(scratch_path + 'longslit_wave.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
-		spec_fits.writeto(scratch_path + 'longslit_spec.fits', clobber=True)
+		wave_fits.writeto(save.path + 'longslit_wave.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
+		spec_fits.writeto(save.path + 'longslit_spec.fits', clobber=True)
 		ds9.open()  #Display spectrum in DS9
 		self.make_label2d(spec_lines, label_lines = True, label_wavelength = True, label_OH = True, num_wave_labels = 50) #Label 2D spectrum,
-		ds9.show(scratch_path + 'longslit_wave.fits', new=False)
+		ds9.show(save.path + 'longslit_wave.fits', new=False)
 		self.show_labels() #Load labels
-		ds9.show(scratch_path + 'longslit_spec.fits', new=True)
+		ds9.show(save.path + 'longslit_spec.fits', new=True)
 		self.show_labels() #Load labels
 		ds9.set('zoom to fit')
 		ds9.set('scale log') #Set view to log scale
@@ -876,11 +980,11 @@ class spec2d:
 				x_label = str(x_labels[j])
 				regions.append('image; line(' + x_label +', '+ top_y + ', ' + x_label + ', ' + bottom_y + ' ) # color=red ')
 				regions.append('image; text('+ x_label +', '+label_y+') # color=red textangle=90 text={'+show_lines.label[j]+'}')
-		region_file_path = scratch_path + '2d_labels.reg'
+		region_file_path = save.path + '2d_labels.reg'
 		savetxt(region_file_path, regions, fmt="%s")  #Save region template file for reading into ds9
 		#ds9.set('regions ' + region_file_path)
 	def show_labels(self): #Called by show() to put line labels in DS9
-		region_file_path = scratch_path + '2d_labels.reg'
+		region_file_path = save.path + '2d_labels.reg'
 		ds9.set('regions ' + region_file_path)
 	# def s2n(self): #Estimate noise per pixel
 	# 	s2n_obj = copy.deepcopy(self)

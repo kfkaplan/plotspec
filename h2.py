@@ -1,20 +1,26 @@
 from pdb import set_trace as stop #Use stop() for debugging
 #from scipy import *
 from pylab import *
+from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
 
-#Global variables
+
+#Global variables, modify
+single_temp = 1500.0 #K
+single_temp_y_intercept = 22.0
+alpha = arange(0.0, -10.0, -0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
+lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
+wave_thresh = 0.5 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
+
+#Global variables, do not modify
 cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
 k = 0.69503476 #Botlzmann constant k in units of cm^-1 K^-1 (from http://physics.nist.gov/cuu/Constants/index.html)
-single_temp = 4000 #K
-single_temp_y_intercept = 15.0
-alpha = arange(0.0, -10.0, -0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
-lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
+
 #Make array of color names
-color_list = []
-for c in matplotlib.colors.cnames:
-    color_list.append(c)
+color_list = ['black','gray','yellow','blue','red','green','beige','magenta','darkgoldenrod','purple','bisque','darkolivegreen', 'cyan','darkorange','orange']
+#for c in matplotlib.colors.cnames:
+    #color_list.append(c)
 
 
 def make_line_list():
@@ -41,12 +47,13 @@ def make_line_list():
 #Definition that takes all the H2 lines with determined column densities and calculates as many differential extinctions as it can between
 #pairs of lines that come from the same upper state, and fits an extinction curve (power law here) to them
 def fit_extinction_curve(transitions):
-	
+	n_doubles_found = 0 #Count doubles (pair from same upper state)
+	n_trips_found = 0 #Count trips
 	i = (transitions.N != 0.0) & (transitions.s2n > 10.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
 	J_upper_found = unique(transitions.J.u[i]) #Find J for all (detected) transition upper states
 	V_upper_found = unique(transitions.V.u[i]) #Find V for all (detected) transition upper states
-	for V in V_upper_found: #Check each upper V for pairs	
-		pairs = [] #Set up array of line pairs for measuring the differential extinction A_lamba1-lambda2
+	pairs = [] #Set up array of line pairs for measuring the differential extinction A_lamba1-lambda2
+	for V in V_upper_found: #Check each upper V for pairs		
 		for J in J_upper_found: #Check each upper J for pairs
 			match_upper_states = (transitions.J.u[i] == J) & (transitions.V.u[i] == V) #Find all transitions from the same upper J and V state
 			waves = transitions.wave[i][match_upper_states] #Store wavelengths of all found transitions
@@ -55,36 +62,43 @@ def fit_extinction_curve(transitions):
 			Fsigma = transitions.sigma[i][match_upper_states] 
 			intrinsic_constants = 1.0 / (transitions.g[i][match_upper_states] * transitions.E.u[i][match_upper_states] * transitions.A[i][match_upper_states]) #Get constants for calculating the intrinsic ratios
 			#Nsigma = transitions.Nsigma[i][match_upper_states] #Grab uncertainity in column densities
-			if len(waves) == 2: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
+			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
 				A_delta_lambda = -2.5*log10((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1])) #Calculate differential extinction between two H2 lines
 				sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[1]/F[1])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 				pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
-				paris = pairs.append(pair) #Save a single pair
+				pairs.append(pair) #Save a single pair
+				n_doubles_found = n_doubles_found + 1
 			elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
 				#Pair 1
-				A_delta_lambda = -2.5*log10((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1])) #Calculate differential extinction between two H2 lines
-				sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[1]/F[1])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
-				pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
-				paris = pairs.append(pair) #Save a single pair
+				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
+					A_delta_lambda = -2.5*log10((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1])) #Calculate differential extinction between two H2 lines
+					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[1]/F[1])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
+					pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
+					pairs.append(pair) #Save a single pair
 				#Pair 2
-				A_delta_lambda = -2.5*log10((F[0]/F[2]) / (intrinsic_constants[0]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
-				sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
-				pair = differential_extinction([waves[0], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
-				paris = pairs.append(pair) #Save a single pair
+				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+					A_delta_lambda = -2.5*log10((F[0]/F[2]) / (intrinsic_constants[0]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
+					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
+					pair = differential_extinction([waves[0], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
+					pairs.append(pair) #Save a single pair
 				#Pair 3
-				A_delta_lambda = -2.5*log10((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
-				sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[1]/F[1])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
-				pair = differential_extinction([waves[1], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
-				paris = pairs.append(pair) #Save a single pair
-		clf() #Clear plot field
-		for pair in pairs: #Loop through each pair
-			pair.fit_curve()
-			plot(alpha, pair.A_K)
-		xlabel('Alpha')
-		ylabel('$A_K$')
-		ylim([-2,20])
-		suptitle('V = ' + str(V))
-		stop()
+				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+					A_delta_lambda = -2.5*log10((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
+					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[1]/F[1])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
+					pair = differential_extinction([waves[1], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
+					pairs.append(pair) #Save a single pair
+				n_trips_found = n_trips_found + 1
+	clf() #Clear plot field
+	for pair in pairs: #Loop through each pair
+		pair.fit_curve()
+		plot(alpha, pair.A_K)
+	xlabel('Alpha')
+	ylabel('$A_K$')
+	ylim([-2,20])
+	suptitle('V = ' + str(V))
+	stop()
+	print 'Number of pairs from same upper state = ', n_doubles_found
+	print 'Number of tripples from same upper state = ', n_trips_found
 	
 	
 		    
@@ -119,6 +133,7 @@ class h2_transitions:
 		self.g = g_ortho_para * (2*J.u+1) #Store degeneracy
 		self.T = E.u / k #Store "temperature" of the energy of the upper state
 		self.wave = E.getwave() #Store wavelength of transitions
+		self.path = '' #Store path for saving excitation diagram and other files, read in when reading in region with definition set_Flux
 	def calculate_column_density(self):
 		self.N = self.F / (self.g * self.E.u * self.A)
 		self.Nsigma = self.sigma /  (self.g * self.E.u * self.A)
@@ -139,6 +154,7 @@ class h2_transitions:
 		#print self.label[found_transitions]#Find all matching transitions in the specified wavelength range with a matching upper J and V state
 		#print self.wave[found_transitions]
 	def set_flux(self, region): #Set the flux of a single line or multiple lines given the label for it, e.g. h2.set_flux('1-0 S(1)', 456.156)
+		self.path = region.path #Set path to 
 		n = len(region.label)
 		if n == 1: #If only a single line
 			matched_line = (self.label == region.label)
@@ -160,41 +176,49 @@ class h2_transitions:
 		ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
    		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
    		show()
-   	def v_plot(self, plot_single_temp = False): #Make simple plot first showing all the different rotational ladders for a constant V
-		nonzero = self.N != 0.0
-		clf()
-		for i in unique(self.V.u):
-			ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > 1.0)  #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
-			ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= 1.0) #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
-			#stop()
-			#plot(self.T[ortho], log(self.N[ortho]), 'o',label=' ',  color=color_list[i*2]) 
-			if any(ortho):
-				log_N = log(self.N[ortho]) #Log of the column density
-				y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
-				errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt='o',  color=color_list[i*2], label=' ', capthick=3, markersize=8)  #Plot data + error bars
-				test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt='o',  color=color_list[i*2], capthick=3, uplims=True, markersize=8, label='_nolegend_') #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
-			#else:
-				#plot([],[],  'o',  color=color_list[i*2], label=' ') #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
-		for i in unique(self.V.u):
-			para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > 1.0) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
-			para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= 1.0) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
-			if any(para):
-				log_N = log(self.N[para]) #Log of the column density
-				y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
-				errorbar(self.T[para], log_N, yerr=y_error_bars, fmt='^',  color=color_list[i*2], label='V='+str(i), capthick=3, markersize=8)  #Plot data + error bars
-				test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt='^',  color=color_list[i*2], capthick=3, uplims=True, markersize=8, label='_nolegend_') #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
-				#plot(self.T[para], log(self.N[para]), '^', label='V='+str(i), color=color_list[i*2])
-			#else:
-				#plot([],[], '^',  color=color_list[i*2], label='V='+str(i)) #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
-		ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
-		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
-		xlim([0,1.35*max(self.T)])
-		legend(loc=1, ncol=2, fontsize=12, numpoints=1, columnspacing=-0.5, title = 'ortho  para          ')
-		if plot_single_temp: #Plot a single temperature line for comparison, if specified
-		    plot(self.T, single_temp_y_intercept - (self.T / single_temp), linewidth=2, color='orange')
-		    midpoint = size(self.T)/2
-		    text(0.7*self.T[midpoint], 0.7*(single_temp_y_intercept - (self.T[midpoint] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
-		show()
+   	def v_plot(self, plot_single_temp = False, show_upper_limits = True): #Make simple plot first showing all the different rotational ladders for a constant V
+		with PdfPages(self.path + '_excitation_diagram.pdf') as pdf: #Make a pdf
+			nonzero = self.N != 0.0
+			clf()
+			for i in unique(self.V.u):
+				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > 1.0)  #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
+				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= 1.0) #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
+				#stop()
+				#plot(self.T[ortho], log(self.N[ortho]), 'o',label=' ',  color=color_list[i*2]) 
+				if any(ortho):
+					log_N = log(self.N[ortho]) #Log of the column density
+					y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
+					errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt='o',  color=color_list[i], label=' ', capthick=3, markersize=8)  #Plot data + error bars
+					if show_upper_limits:
+						test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt='o',  color=color_list[i], capthick=3, uplims=True, markersize=8) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+				#else:
+					#errorbar([], [], yerr=1.0, fmt='o',  color=color_list[i], label=' ', capthick=3, markersize=8)  #Plot data + error bars
+					#plot([],[],  'o',  color=color_list[i*3], label=' ') #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
+			for i in unique(self.V.u):
+				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > 1.0) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
+				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= 1.0) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
+				if any(para):
+					log_N = log(self.N[para]) #Log of the column density
+					y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
+					errorbar(self.T[para], log_N, yerr=y_error_bars, fmt='^',  color=color_list[i], label='V='+str(i), capthick=3, markersize=8)  #Plot data + error bars
+					if show_upper_limits:
+						test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt='^',  color=color_list[i], capthick=3, uplims=True, markersize=8) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+					#plot(self.T[para], log(self.N[para]), '^', label='V='+str(i), color=color_list[i])
+				#else:
+					#errorbar([], [], yerr=1.0, fmt='^',  color=color_list[i], label='V='+str(i), capthick=3, markersize=8)  #Plot data + error bars
+					#plot([],[], '^',  color=color_list[i*3], label='V='+str(i)) #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
+			ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
+			xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
+			xlim([0,1.35*max(self.T)])
+			legend(loc=1, ncol=2, fontsize=12, numpoints=1, columnspacing=-0.5, title = 'ortho  para          ')
+			if plot_single_temp: #Plot a single temperature line for comparison, if specified
+				x = arange(0,20000, 10)
+				plot(x, single_temp_y_intercept - (x / single_temp), linewidth=2, color='orange')
+				midpoint = size(x)/2
+				text(0.7*x[midpoint], 0.7*(single_temp_y_intercept - (x[midpoint] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
+			show()
+			pdf.savefig() #Add in the pdf
+			stop()
 
 
 
