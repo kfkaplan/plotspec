@@ -9,8 +9,12 @@ import time #To put in delays
 
 #Open DS9
 def open():
-  call('ds9 &', shell=True) #Load DS9
-  time.sleep(4) #Give computer a few seconds to respond after opening DS9
+  #call('xpans &', shell=True) #Load XPA immediately, so XPA commands can be sent to ds9, commented out for now, apparently doesn't work
+  #call('ds9 &', shell=True) #Load DS9
+  if check_output('xpaaccess ds9 &', shell=True) == 'no\n':
+    call(['/bin/bash', '-i', '-c', 'ds9 &']) #Load DS9 with bash, change bash to whatever shell you use if you are having issues
+  while check_output('xpaaccess ds9 &', shell=True) == 'no\n': #While loop that checks every second or so if DS9 is open before continuing
+    time.sleep(1) #Wait one second than check if DS9 is open again
   
 #def close():
 #  call('xpaset -p ds9 exit')
@@ -19,7 +23,7 @@ def close():
   
 #Get xpaget statements from ds9
 def get(command):
-  result = check_output('xpaget ds9 ' + command, shell=True) #Get information from ds9 using XPA get
+  result = check_output('xpaget ds9 ' + command, shell=True, executable='/bin/bash') #Get information from ds9 using XPA get
   return str(result).strip() #return information grabbed from ds9
 
 #Send xpaset commands to ds9

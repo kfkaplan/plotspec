@@ -23,6 +23,8 @@ except ImportError:
 	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
 
 #Global variables user should set
+#pipeline_path = '/media/kfkaplan/IGRINS_Data/plp-testing/' #Paths for running on linux laptop
+#save_path = '/home/kfkaplan/Desktop/results/'
 pipeline_path = '/Volumes/IGRINS_data/plp-testing/'#Define path to pipeline directory where reduced data is stored
 #pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
 save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files
@@ -80,7 +82,7 @@ def mask_hydrogen_lines(wave, flux):
 
 
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, quality_cut = False, show_plots=True, tweak_test = False):
+def telluric_and_flux_calib(sci, std, std_flattened, quality_cut = False, show_plots=True, tweak_test = False, no_flux = False):
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
 	vega_wave = vega_wave / 1e3 #convert angstroms to microns
@@ -196,7 +198,10 @@ def telluric_and_flux_calib(sci, std, std_flattened, quality_cut = False, show_p
 			std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
 			if read_variance:
 				std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
-		sci.orders[i].flux = sci.orders[i].flux * flux_calib/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
+		if not no_flux: #As long as user does not specify doing a flux calibration
+			sci.orders[i].flux = sci.orders[i].flux * flux_calib/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
+		else:  #Else if user does not want to do a flux calibration, just do a telluric correction
+			sci.orders[i].flux = sci.orders[i].flux / (std_flattened.orders[i].flux)
 		if read_variance or num_dimensions == 1:
 			sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
 			sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
@@ -616,7 +621,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, twodim=True):
+def getspec(date, waveno, frameno, stdno, twodim=True, usestd=True, no_flux=False):
 	#Make 1D spectrum object for standard star
 	H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
 	K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
@@ -646,14 +651,20 @@ def getspec(date, waveno, frameno, stdno, twodim=True):
 		sci2d_obj.orders = K_sci2d_obj.orders + H_sci2d_obj.orders #Combine orders
 		sci2d_obj.n_orders = K_sci2d_obj.n_orders + H_sci2d_obj.n_orders #Find new total number of orders
 	#Apply telluric correction & relative flux calibration
-	spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, show_plots=False) #For 1D spectrum
-	if twodim: #If user specifies this object has a 2D spectrum
-		spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, show_plots=False) #Run for 2D spectrum
-	#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
-	if twodim:
-		return spec1d, spec2d #Return both 1D and 2D spectra objects
-	else:
-		return spec1d #Only return 1D spectra object
+	if usestd: #If user wants to use standard star (True by default)
+		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, show_plots=False, no_flux=no_flux) #For 1D spectrum
+		if twodim: #If user specifies this object has a 2D spectrum
+			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, show_plots=False, no_flux=no_flux) #Run for 2D spectrum
+		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
+		if twodim:
+			return spec1d, spec2d #Return both 1D and 2D spectra objects
+		else:
+			return spec1d #Only return 1D spectra object
+	else: #If user does not want to use standard star
+		if twodim:
+			return sci1d_obj, sci2d_obj #Return both 1D and 2D spectra objects
+		else:
+			return sci1d_obj #Only return 1D spectra object
 		
 
 
@@ -775,14 +786,17 @@ class spec1d:
 		show()
 		#draw()
 	#Plot spectrum with lines from line list overplotted
-	def plotlines(self, linelist, threshold=0.0, model='', rows=5):
-		if not self.combospec in vars(): #Check if a combined spectrum exists
+	def plotlines(self, linelist, threshold=0.0, model='', rows=5, ymax=0.0, fontsize=9.5):
+		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #Combine spectrum before plotting, if not done already
 		clf() #Clear plot
 		min_wave  = min(self.combospec.wave) #Find maximum wavelength
 		max_wave  = max(self.combospec.wave) #Find minimum wavelength
-		max_flux = nanmax(self.combospec.flux, axis=0)
+		if ymax == 0.0: #If use does not set maximum y, do it automatically
+			max_flux = nanmax(self.combospec.flux, axis=0)
+		else: #else set it to what the user wants
+			max_flux  = ymax / 1.4 
 		total_wave_coverage = max_wave - min_wave #Calculate total wavelength coverage
 		if (model != '') and (model != 'none'): #Load model for comparison if needed
 			model_wave, model_flux = loadtxt(model, unpack=True) #Read in text file of model with format of two columns with wave <tab> flux
@@ -810,7 +824,7 @@ class spec1d:
 						#text(linelist_wave[i], linelist_flux[i]+max_flux*0.02, '$\oplus$', rotation=90, fontsize=9, verticalalignment='bottom', horizontalalignment='center', color='black') 
 					else:   #If no OH lines found, plot lines on figure
 						plot([sub_linelist.wave[i], sub_linelist.wave[i]], [sub_linelist.flux[i], sub_linelist.flux[i] + max_flux*0.065], ':', color='black') #Plot location of line as a dotted line a little bit above the spectrum
-						text(sub_linelist.wave[i], sub_linelist.flux[i] +  max_flux*0.073, sub_linelist.label[i], rotation=90, fontsize=9.5, verticalalignment='bottom', horizontalalignment='center', color='black')  #Label line with text
+						text(sub_linelist.wave[i], sub_linelist.flux[i] +  max_flux*0.073, sub_linelist.label[i], rotation=90, fontsize=fontsize, verticalalignment='bottom', horizontalalignment='center', color='black')  #Label line with text
 			plot(self.combospec.wave[sci_in_range], self.combospec.flux[sci_in_range], color='blue') #Plot actual spectrum
 			if (model != '') and (model != 'none'): #Load model for comparison if needed
 				model_in_range = logical_and(model_wave > wave_range[0], model_wave < wave_range[1]) #Find portion of model spectrum in a given row 
@@ -829,7 +843,12 @@ class spec1d:
 		for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
 			mask_these_pixels = abs(self.combospec.wave-parsed_OH_lines.wave[i]) < 0.00006 #Create mask of OH lines...
 			self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
-
+	def savespec(self, name='1d_spectrum.dat'): #Save 1D spectrum, set 'name' to be the filename yo uwant
+		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
+			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			self.combine_orders() #Combine spectrum before plotting, if not done already
+		savetxt(save.path + name, transpose([self.combospec.wave, self.combospec.flux])) #Save 1D spectrum as simple .dat file with wavelength and flux in seperate columns
+		
 
 
 #Class to store and analyze a 2D spectrum
@@ -913,8 +932,8 @@ class spec2d:
 			combospec.s2n = concatenate([self.orders[i+1].s2n[:, goodpix_next_order], combospec.s2n[:, goodpix_combospec] ], axis=1) #Stitch s2n arrays together
 		self.combospec = combospec #save the orders all stitched together
 	#Simple function for displaying the combined 2D spectrum
-	def plot(self, spec_lines, pause = False, close = False, s2n = False):
-		if not self.combospec in vars(): #Check if a combined spectrum exists
+	def plot(self, spec_lines, pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
+		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #If combined spectrum does not exist, combine the orders
 		wave_fits = fits.PrimaryHDU(self.combospec.wave)    #Create fits file containers
@@ -925,7 +944,7 @@ class spec2d:
 		wave_fits.writeto(save.path + 'longslit_wave.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
 		spec_fits.writeto(save.path + 'longslit_spec.fits', clobber=True)
 		ds9.open()  #Display spectrum in DS9
-		self.make_label2d(spec_lines, label_lines = True, label_wavelength = True, label_OH = True, num_wave_labels = 50) #Label 2D spectrum,
+		self.make_label2d(spec_lines, label_lines = True, label_wavelength = True, label_OH = label_OH, num_wave_labels = num_wave_labels) #Label 2D spectrum,
 		ds9.show(save.path + 'longslit_wave.fits', new=False)
 		self.show_labels() #Load labels
 		ds9.show(save.path + 'longslit_spec.fits', new=True)
