@@ -16,9 +16,12 @@ cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
 k = 0.69503476 #Botlzmann constant k in units of cm^-1 K^-1 (from http://physics.nist.gov/cuu/Constants/index.html)
+h = 6.6260755e-27 #Plank constant in erg s, used for converting energy in wave numbers to cgs
+c = 2.99792458e10 #Speed of light in cm s^-1, used for converting energy in wave numbers to cgs
 
 #Make array of color names
 color_list = ['black','gray','yellow','blue','red','green','beige','magenta','darkgoldenrod','purple','bisque','darkolivegreen', 'cyan','darkorange','orange']
+symbol_list = ['o','v','8','x','s','*','h','D','^','8','1','o','o','o'] #Symbol list for rotation ladders on black and white Boltzmann plot
 #for c in matplotlib.colors.cnames:
     #color_list.append(c)
 
@@ -76,7 +79,7 @@ def fit_extinction_curve(transitions):
 					pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
 					pairs.append(pair) #Save a single pair
 				#Pair 2
-				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
 					A_delta_lambda = -2.5*log10((F[0]/F[2]) / (intrinsic_constants[0]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
 					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 					pair = differential_extinction([waves[0], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
@@ -134,9 +137,9 @@ class h2_transitions:
 		self.T = E.u / k #Store "temperature" of the energy of the upper state
 		self.wave = E.getwave() #Store wavelength of transitions
 		self.path = '' #Store path for saving excitation diagram and other files, read in when reading in region with definition set_Flux
-	def calculate_column_density(self):
-		self.N = self.F / (self.g * self.E.u * self.A)
-		self.Nsigma = self.sigma /  (self.g * self.E.u * self.A)
+	def calculate_column_density(self): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
+		self.N = self.F / (self.g * self.E.u * h * c * self.A)
+		self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
 	def makelabel(self): #Make labels for each transition in spectroscopic notation.
 		labels = []
 		for i in xrange(self.n_lines):
@@ -176,11 +179,21 @@ class h2_transitions:
 		ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
    		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
    		show()
-   	def v_plot(self, plot_single_temp = False, show_upper_limits = True): #Make simple plot first showing all the different rotational ladders for a constant V
+   	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False): #Make simple plot first showing all the different rotational ladders for a constant V
 		with PdfPages(self.path + '_excitation_diagram.pdf') as pdf: #Make a pdf
 			nonzero = self.N != 0.0
 			clf()
+			symbsize = 9 #Size of symbols on excitation diagram
+			labelsize = 24 #Size of text for labels
+			orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
+			parafill = 'none'
 			for i in unique(self.V.u):
+				if nocolor: #If user specifies no color,
+					current_color = 'gray'
+					current_symbol = symbol_list[i-1]
+				else: #Or else by default use colors from the color list defined at the top of the code
+					current_color = color_list[i]
+					current_symbol = 'o'
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > 1.0)  #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= 1.0) #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				#stop()
@@ -188,29 +201,36 @@ class h2_transitions:
 				if any(ortho):
 					log_N = log(self.N[ortho]) #Log of the column density
 					y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
-					errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt='o',  color=color_list[i], label=' ', capthick=3, markersize=8)  #Plot data + error bars
+					errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					if show_upper_limits:
-						test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt='o',  color=color_list[i], capthick=3, uplims=True, markersize=8) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+						test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 				#else:
 					#errorbar([], [], yerr=1.0, fmt='o',  color=color_list[i], label=' ', capthick=3, markersize=8)  #Plot data + error bars
 					#plot([],[],  'o',  color=color_list[i*3], label=' ') #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
 			for i in unique(self.V.u):
+				if nocolor: #If user specifies no color,
+					current_color = 'Black'
+					current_symbol = symbol_list[i-1]
+				else: #Or else by default use colors from the color list defined at the top of the code
+					current_color = color_list[i]
+					current_symbol = '^'
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > 1.0) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= 1.0) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para):
 					log_N = log(self.N[para]) #Log of the column density
 					y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
-					errorbar(self.T[para], log_N, yerr=y_error_bars, fmt='^',  color=color_list[i], label='V='+str(i), capthick=3, markersize=8)  #Plot data + error bars
+					errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='V='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					if show_upper_limits:
-						test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt='^',  color=color_list[i], capthick=3, uplims=True, markersize=8) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+						test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					#plot(self.T[para], log(self.N[para]), '^', label='V='+str(i), color=color_list[i])
 				#else:
 					#errorbar([], [], yerr=1.0, fmt='^',  color=color_list[i], label='V='+str(i), capthick=3, markersize=8)  #Plot data + error bars
 					#plot([],[], '^',  color=color_list[i*3], label='V='+str(i)) #Make a plot of nothing if there are no datapoints to plot, to get an entry in the legend
-			ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
-			xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
+			tick_params(labelsize=14) #Set tick mark label size
+			ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=labelsize)
+			xlabel("Excitation Energy     (E/k)     [K]", fontsize=labelsize)
 			xlim([0,1.35*max(self.T)])
-			legend(loc=1, ncol=2, fontsize=12, numpoints=1, columnspacing=-0.5, title = 'ortho  para          ')
+			legend(loc=1, ncol=2, fontsize=18, numpoints=1, columnspacing=-0.5, title = 'ortho  para          ')
 			if plot_single_temp: #Plot a single temperature line for comparison, if specified
 				x = arange(0,20000, 10)
 				plot(x, single_temp_y_intercept - (x / single_temp), linewidth=2, color='orange')
@@ -218,7 +238,7 @@ class h2_transitions:
 				text(0.7*x[midpoint], 0.7*(single_temp_y_intercept - (x[midpoint] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
 			show()
 			pdf.savefig() #Add in the pdf
-			stop()
+			#stop()
 
 
 
