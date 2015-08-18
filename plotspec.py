@@ -17,6 +17,7 @@ import copy #Allow objects to be copied
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
+from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
@@ -25,8 +26,9 @@ except ImportError:
 #Global variables user should set
 #pipeline_path = '/media/kfkaplan/IGRINS_Data/plp-testing/' #Paths for running on linux laptop
 #save_path = '/home/kfkaplan/Desktop/results/'
-pipeline_path = '/Volumes/IGRINS_data/plp-testing/'#Define path to pipeline directory where reduced data is stored
+#pipeline_path = '/Volumes/IGRINS_data/plp-testing/'#Define path to pipeline directory where reduced data is stored
 #pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
+pipeline_path = '/Volumes/IGRINS_data/plp-2.1-alpha.1/'
 save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files
 read_variance = True #Boolean that tells code to use variance for 2D maps (or not) NOTE: This is an experimental feature and not yet implemented in the official pipeline.
 #default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
@@ -35,7 +37,7 @@ velocity_range =100.0 # +/- km/s for interpolated velocity grid
 velocity_res = 1.0 #Resolution of velocity grid
 #slit_length = 62 #Number of pixels along slit in both H and K bands
 slit_length = 61 #Number of pixels along slit in both H and K bands
-block = 300 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
+block = 750 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
 
 #Global variables, should remain untouched
 data_path = pipeline_path + 'outdata/'
@@ -260,7 +262,7 @@ def OH_correction(sky):
 
 #Class creates, stores, and displays lines as position velocity diagrams, one of the main tools for analysis
 class position_velocity:
-	def __init__(self, spec1d, spec2d, line_list, s2n=False):
+	def __init__(self, spec1d, spec2d, line_list, s2n=False, make_1d=False, shift_lines=''):
 		slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
 		wave_pixels = spec2d.wave[0,:] #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
@@ -272,6 +274,14 @@ class position_velocity:
 		show_lines = line_list.parse(min_wave, max_wave) #Only grab lines withen the wavelength range of the current order
 		flux = [] #Set up list of arrays to store 1D fluxes
 		var1d = []
+		if shift_lines != '': #If user wants to apply a correction in velocity space to a set of lines, use this file shift_lines
+			shift_labels = loadtxt(shift_lines, usecols=[0,], dtype=str, delimiter='\t') #Load line labels to ID each line
+			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
+			for i in xrange(len(shift_labels)): #Go through each line and shift it's wavlength
+				find_line = where(show_lines.label == shift_labels[i])[0][0] #Find matching line to shift
+				show_lines.wave[find_line] = show_lines.wave[find_line] * (-(shift_v[i]/c)+1.0)#Artifically doppler shift the line
+				print shift_labels[i]
+				#stop()
 		for line_wave in show_lines.wave: #Label the lines
 			pv_velocity = c * ( (spec2d.wave - line_wave) /  line_wave ) #Calculate velocity offset for each pixel from c*delta_wave / wave
 			pixel_cut = abs(pv_velocity[0]) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
@@ -288,11 +298,16 @@ class position_velocity:
 				interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			#ungridded_flux_1d = interp_flux_1d(ungridded_velocities) #PV diagram ungridded on origional pixels
 			#ungridded_flux_2d = interp_flux_2d(ungridded_velocities) #PV diagram ungridded on origional pixels
-			gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
 			gridded_flux_2d = interp_flux_2d(interp_velocity) #PV diagram velocity gridded	
-			gridded_variance_1d = interp_variance_1d(interp_velocity) #PV diagram variance velocity gridded
 			if read_variance: #If user specifies read in 2D variance
 				gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
+			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
+				gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
+				gridded_variance_1d = interp_variance_1d(interp_velocity) #PV diagram variance velocity gridded
+			else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
+				gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
+				if read_variance: #If user specifies read in 2D variance
+					gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
 			if nanmin(ungridded_flux_1d) != nan: #Check if everything near line is nan, if so skip over this code to avoid bug
 				scale_flux_1d = 1.0
 				scale_flux_2d = 1.0
@@ -422,7 +437,7 @@ class position_velocity:
 				suptitle(title)
 				imshow(self.pv[i,:,:], cmap='gray')
 				pdf.savefig() #Save as a page in a PDF file
-	def plot_1d_velocity(self, line_index, title='', clear=True, fontsize=18): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
+	def plot_1d_velocity(self, line_index, title='', clear=True, fontsize=18, show_zero=True): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
 		if clear: #Clear plot space, unless usser sets clear=False
 			clf() #Clear plot space
 		velocity = self.velocity
@@ -433,7 +448,8 @@ class position_velocity:
 		plot(velocity, flux, color='black') #Plot 1D spectrum slice
 		#plot(velocity, flux + noise, ':', color='red') #Plot noise level for 1D spectrum slice
 		#plot(velocity, flux - noise, ':', color='red') #Plot noise level for 1D spectrum slice
-		plot([0,0], [-0.1*max_flux, max_flux], '--', color='blue') #Plot velocity zero point
+		if show_zero: #Normally show the zero point line, but if user does not want it, don't plot it
+			plot([0,0], [-0.1*max_flux, max_flux], '--', color='black') #Plot velocity zero point
 		xlim([-velocity_range, velocity_range]) #Set xrange to be +/- the velocity range set for the PV diagrams
 		ylim([-0.1*max_flux, max_flux]) #Set yrange
 		if title != '': #Add title to plot showing line name, wavelength, etc.
@@ -474,6 +490,17 @@ class position_velocity:
 		# 	s2n_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		# 	s2n_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
 		# 	s2n_file.writeto(scratch_path + 'pv_s2n.fits', clobber  = True) #Save fits file
+        def save_var(self): #Save fits file of PV diagrams variance
+		pv_file = fits.PrimaryHDU(self.var2d) #Set up fits file object
+		#Add WCS for linear interpolated velocity
+		pv_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
+		pv_file.header['CRPIX1'] = (velocity_range / velocity_res) + 1 #Set zero point to where v=0 km/s (middle of stamp)
+		pv_file.header['CDELT1'] = velocity_res #Set zero point to where v=0 km/s (middle of stamp)
+		pv_file.header['CUNIT1'] = 'km/s' #Set label for x axis to be km/s
+		pv_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
+		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
+		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
+		pv_file.writeto(save.path + 'pv_var2d.fits', clobber  = True) #Save fits file
 	def getline(self, line): #Grabs PV diagram for a single line given a line label
 		i =  where(self.label == line)[0][0] #Search for line by label
 		return self.pv[i] #Return line found
@@ -527,7 +554,7 @@ class position_velocity:
 
 
 class region: #Class for reading in a DS9 region file, and applying it to a position_velocity object
-	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0):
+	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True):
 		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		use_background_region = False
 		line_labels =  pv.label #Read out line labels
@@ -539,6 +566,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		pv_variance[bad_data] == nan
 		pv_shape = shape(pv_data[0,:,:]) #Read out shape of a 2D slice of the pv diagram cube
 		n_lines = len(pv_data[:,0,0]) #Read out number of lines
+		velocity_range = [min(pv.velocity), max(pv.velocity)]
 		if file == '': #If no region file is specified by the user, prompt user for the path to the region file
 			file = raw_input('What is the name of the region file? ')
 		if background == '': #If no background region file is specified by the user, ask if user wants to specify region, and if so ask for path
@@ -570,6 +598,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				frame = gca() #Turn off axis number labels
 				frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
 				frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
+				#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
 				on_data = pv_data[i,:,:][on_mask] #Find data inside the region for grabbing the flux
 				on_variance = pv_variance[i,:,:][on_mask]
 				if use_background_region: #If a backgorund region is specified
@@ -582,20 +611,23 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
 					line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
-					imshow(pv_data[i,:,:], cmap='gray', interpolation='Nearest', origin='lower') #Save preview of line and region(s)
-					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=16)
+					imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
+					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
 					#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
 					#xlabel('Velocity [km s$^{-1}$]')
-					ylabel('Along slit')
-					for p in on_patch_list: #Display DS9 regions in matplotlib
-						ax.add_patch(p)
-					for t in on_text_list:
-						ax.add_artist(t)
-					if use_background_region:
-						for p in off_patch_list:
+					#ylabel('Along slit')
+					ylabel('Position', fontsize=16)
+					#xlabel('Velocity [km s$^{-1}$]')
+					if show_regions: #By default show the 
+						for p in on_patch_list: #Display DS9 regions in matplotlib
 							ax.add_patch(p)
-						for t in off_text_list:
+						for t in on_text_list:
 							ax.add_artist(t)
+						if use_background_region:
+							for p in off_patch_list:
+								ax.add_patch(p)
+							for t in off_text_list:
+								ax.add_artist(t)
 					ax = subplot(212) #Turn on "ax", set first subplot
 					pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
 					pdf.savefig() #Add figure as a page in the pdf
@@ -606,6 +638,16 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
 		self.path = path #Save path to 
+
+def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
+	combined_region = copy.deepcopy(region_A) #Start by created the combined region
+	combined_region.flux = combined_region.flux + region_B.flux #Add fluxes together
+	combined_region.sigma = sqrt(combined_region.sigma**2 + region_B.sigma**2) #Add uncertianity in quadrature
+	combined_region.s2n = combined_region.flux / combined_region.sigma #Recalculate new S/N
+	combined_region.path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
+	return(combined_region) #Returned combined region
+
+
 	#def process_h2(self): #Create and store fluxes for H2 for this region, used mainly for testing, user should use this code in their own scripts to combine H2 lines from H and K bands
 		#h2_transitions = h2.make_line_list() #Set up H2 transition object
 		#h2_transitions.set_flux_in_region_obj(self.label, self.flux, self.s2n, self.sigma) #Read in fluxes for this region and assign them each to the appropriate H2 line
@@ -615,13 +657,70 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		#stop() #For testing
 
 
+class extract: #Class for extracting fluxes in 1D from a position_velocity object
+	def __init__(self, pv, name='flux_1d', file='', background=True, s2n_cut = -99.0, vrange=[0,0], use2d=False, show_extraction=True):
+		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
+		line_labels =  pv.label #Read out line labels
+		line_wave = pv.lab_wave #Read out (lab) line wavelengths
+		if use2d: #By default use the 1D spectrum (for ABBA observations), but use 2D for extended objects
+			flux = nansum(pv.pv, 1) #Collapse flux along slit
+			var = nansum(pv.var2d, 1)#Collapse variance along slit
+		else:
+			flux = pv.flux #Holder for flux datacube
+			var = pv.var1d #holder for variance datacube
+		velocity = pv.velocity
+		#bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through
+		#pv_data[bad_data] == nan
+		#pv_variance[bad_data] == nan
+		#pv_shape = shape(pv_data[0,:,:]) #Read out shape of a 2D slice of the pv diagram cube
+		n_lines = pv.n_lines #Read out number of lines
+		if range == [0,0]: #If user does not specify velocity range, ask for it from user
+			low_range = float(raw_input('What is blue velocity limit? '))
+			high_range = float(raw_input('What is red velocity limit? '))
+		on_target = (velocity > vrange[0]) & (velocity < vrange[1]) #Find points inside user chosen velocity range
+		off_target = ~on_target #Find points outside user chosen velocity range
+		#figure(figsize=(4.0,3.0), frameon=False) #Set up figure check size
+		figure(0)
+		with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
+			line_flux = zeros(n_lines) #Set up array to store line fluxes
+			line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
+			line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
+			for i in xrange(n_lines): #Loop through each line
+				clf() #Clear plot field
+				data = flux[i]
+				variance = var[i]
+				if background: #If user 
+					background_level =  nanmedian(data[off_target]) #Calculate level (per pixel) of the background level
+				else: #If no background region is specified by the user, use the whole field 
+					background_level = 0.0 #Or if you don't want to subtract the background, just make the level per pixel = 0
+				line_flux[i] = nansum(data[on_target]) - background_level * size(data[on_target]) #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
+				if read_variance: #If user sets variance to be read in
+					line_sigma[i] =  sqrt( nansum(variance[on_target]) ) #Store 1 sigma uncertainity for line
+					line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
+					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
+					pv.plot_1d_velocity(i, clear=False, fontsize=16, show_zero=show_extraction) #Test plotting 1D spectrum below 2D spectrum
+					if show_extraction: #By default, the extraction velocity limits and background level are shown.  If user sets show_extraction = False, these are not shown
+						plot([vrange[0], vrange[0]], [-1e50,1e50], linestyle='--', color = 'blue')  #Plot blueshifted velocity limits
+						plot([vrange[1], vrange[1]], [-1e50,1e50], linestyle='--', color = 'blue')  #Plot redshifted velocity limits
+						plot([min(velocity), max(velocity)], [background_level/1e3, background_level/1e3], linestyle='--', color = 'blue') #Plot background level
+					print "background_level = ",background_level
+					pdf.savefig() #Add figure as a page in the pdf
+		#dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
+		self.wave = line_wave #Save wavelength of lines
+		self.label = line_labels #Save labels of lines
+		self.flux = line_flux #Save line fluxes
+		self.s2n = line_s2n #Save line S/N
+		self.sigma = line_sigma #Save the 1 sigma limit
+		self.path = path #Save path to 
+
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for reading in analyzing spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~j
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, twodim=True, usestd=True, no_flux=False):
+def getspec(date, waveno, frameno, stdno, twodim=True, usestd=True, no_flux=False, make_1d=False):
 	#Make 1D spectrum object for standard star
 	H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
 	K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
@@ -650,6 +749,10 @@ def getspec(date, waveno, frameno, stdno, twodim=True, usestd=True, no_flux=Fals
 		sci2d_obj = H_sci2d_obj #Create master object
 		sci2d_obj.orders = K_sci2d_obj.orders + H_sci2d_obj.orders #Combine orders
 		sci2d_obj.n_orders = K_sci2d_obj.n_orders + H_sci2d_obj.n_orders #Find new total number of orders
+		if make_1d: #If user specifies they want to make a 1D spectrum, we will overwrite the spec1d
+			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
+				sci1d_obj.orders[i].flux = nansum(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
+				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
 	#Apply telluric correction & relative flux calibration
 	if usestd: #If user wants to use standard star (True by default)
 		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, show_plots=False, no_flux=no_flux) #For 1D spectrum
@@ -671,8 +774,10 @@ def getspec(date, waveno, frameno, stdno, twodim=True, usestd=True, no_flux=Fals
 
 #Wrapper for easily creating a 1D or 2D comprehensive spectrum object of any type, allowing user to import an entire specturm object in one line
 def makespec(date, band, waveno, frameno, std=False, twodim=False, s2n=False):
-	spec_data = fits_file(date, frameno, band, std=std, twodim=twodim, s2n=s2n) #Read in data from spectrum
+	#spec_data = fits_file(date, frameno, band, std=std, twodim=twodim, s2n=s2n) #Read in data from spectrum
+	spec_data = fits_file(date, frameno, band, std=std, twodim=twodim)
 	wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
+
 	if twodim and not read_variance: #If spectrum is 2D but no variance data to be read in
 		spec_obj = spec2d(wave_data, spec_data) #Create 2D spectrum object
 	elif twodim and read_variance: #If spectrum is 2D and variance data will be read in
@@ -786,7 +891,7 @@ class spec1d:
 		show()
 		#draw()
 	#Plot spectrum with lines from line list overplotted
-	def plotlines(self, linelist, threshold=0.0, model='', rows=5, ymax=0.0, fontsize=9.5):
+	def plotlines(self, linelist, threshold=0.0, model='', rows=5, ymax=0.0, fontsize=9.5, relative=False):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #Combine spectrum before plotting, if not done already
@@ -796,6 +901,10 @@ class spec1d:
 		if ymax == 0.0: #If use does not set maximum y, do it automatically
 			max_flux = nanmax(self.combospec.flux, axis=0)
 		else: #else set it to what the user wants
+			max_flux  = ymax / 1.4 
+		if relative: #If relative set = true, make scale relative to whatever ymax was set to
+			self.combospec.flux = self.combospec.flux / ymax
+			ymax = 1.0
 			max_flux  = ymax / 1.4 
 		total_wave_coverage = max_wave - min_wave #Calculate total wavelength coverage
 		if (model != '') and (model != 'none'): #Load model for comparison if needed
@@ -825,7 +934,7 @@ class spec1d:
 					else:   #If no OH lines found, plot lines on figure
 						plot([sub_linelist.wave[i], sub_linelist.wave[i]], [sub_linelist.flux[i], sub_linelist.flux[i] + max_flux*0.065], ':', color='black') #Plot location of line as a dotted line a little bit above the spectrum
 						text(sub_linelist.wave[i], sub_linelist.flux[i] +  max_flux*0.073, sub_linelist.label[i], rotation=90, fontsize=fontsize, verticalalignment='bottom', horizontalalignment='center', color='black')  #Label line with text
-			plot(self.combospec.wave[sci_in_range], self.combospec.flux[sci_in_range], color='blue') #Plot actual spectrum
+			plot(self.combospec.wave[sci_in_range], self.combospec.flux[sci_in_range], color='black') #Plot actual spectrum
 			if (model != '') and (model != 'none'): #Load model for comparison if needed
 				model_in_range = logical_and(model_wave > wave_range[0], model_wave < wave_range[1]) #Find portion of model spectrum in a given row 
 				plot(model_wave[model_in_range], model_flux[model_in_range], color='red') #Plot model spectrum
@@ -837,11 +946,11 @@ class spec1d:
 			minorticks_on() #Show minor tick marks
 			gca().set_autoscale_on(False) #Turn off autoscaling
 		show() #Show spectrum
-	def mask_OH(self): #Mask OH lines, use only after processing and combinging spectrum to make a cleaner 1D spectrum
-		OH_lines = lines(OH_line_list, delta_v=0.0) #Load OH line list
+	def mask_OH(self, width=0.00006, input_linelist=OH_line_list): #Mask OH lines, use only after processing and combinging spectrum to make a cleaner 1D spectrum
+		OH_lines = lines(input_linelist, delta_v=0.0) #Load OH line list
 		parsed_OH_lines = OH_lines.parse( min(self.combospec.wave), max(self.combospec.wave))
 		for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
-			mask_these_pixels = abs(self.combospec.wave-parsed_OH_lines.wave[i]) < 0.00006 #Create mask of OH lines...
+			mask_these_pixels = abs(self.combospec.wave-parsed_OH_lines.wave[i]) < width #Create mask of OH lines...
 			self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
 	def savespec(self, name='1d_spectrum.dat'): #Save 1D spectrum, set 'name' to be the filename yo uwant
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
@@ -1092,7 +1201,7 @@ def robust_median_filter(input_flux, size = half_block):
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
 			median_result[i] = nanmedian(flux[x_left[i]:x_right[i]])  #Calculate median between x_left and x_right for a given pixel
 	return median_result
-
+	
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~ Various commands ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
