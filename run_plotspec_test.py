@@ -8,6 +8,8 @@ save.name('NGC 7027')
 date = 20141023
 frameno = 51
 stdno = 59
+H =  5.813 #H & K magnitudes for std A0V star HD 205314 for redding A0V model continuum for relative flux calibration
+K = 5.788
 waveno = 118
 #waveno = 59
 skyno = 118
@@ -18,7 +20,7 @@ ncapture_lines = lines('neutron_capture_species_ngc7027.dat', delta_v = 33.0)
 h2_transitions = h2.make_line_list() #Set up object for storing H2 transitions
 
 #~~~~~~~~~~~~~~~~~~~~SCRIPT FOR ANALYSING SPECTRA~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-spec1d, spec2d = getspec(date, waveno, frameno, stdno) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?)
+spec1d, spec2d = getspec(date, waveno, frameno, stdno, H=H, K=K) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?), also input H & K mags for std. star
 #spec1d.subtract_continuum() #Subtract continuum from 1D spectrum, comment out to not subtract continuum
 spec2d.subtract_continuum() #Subtract continuum from 2D spectrum, comment out to not subtract continuum
 spec1d.combine_orders() #Combine all orders in 1D spectrum into one very long spectrum
