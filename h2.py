@@ -11,7 +11,7 @@ from bottleneck import *
 #Global variables, modify
 single_temp = 1500.0 #K
 single_temp_y_intercept = 22.0
-alpha = arange(0.0, -10.0, -0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
+alpha = arange(0.0, 10.0, 0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
 lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
 wave_thresh = 0.5 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
@@ -103,10 +103,13 @@ def make_line_list():
 def fit_extinction_curve(transitions):
 	n_doubles_found = 0 #Count doubles (pair from same upper state)
 	n_trips_found = 0 #Count trips
-	i = (transitions.N != 0.0) & (transitions.s2n > 10.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	#i = (transitions.N != 0.0) & (transitions.s2n > 10.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	i = (transitions.F != 0.0) & (transitions.s2n > 0.5) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
 	J_upper_found = unique(transitions.J.u[i]) #Find J for all (detected) transition upper states
 	V_upper_found = unique(transitions.V.u[i]) #Find V for all (detected) transition upper states
 	pairs = [] #Set up array of line pairs for measuring the differential extinction A_lamba1-lambda2
+	observed_to_intrinsic = []
+	wave_sets = []
 	for V in V_upper_found: #Check each upper V for pairs		
 		for J in J_upper_found: #Check each upper J for pairs
 			match_upper_states = (transitions.J.u[i] == J) & (transitions.V.u[i] == V) #Find all transitions from the same upper J and V state
@@ -114,14 +117,16 @@ def fit_extinction_curve(transitions):
 			#N = transitions.N[i][match_upper_states] #Store all column densities for found transitions
 			F = transitions.F[i][match_upper_states] 
 			Fsigma = transitions.sigma[i][match_upper_states] 
-			intrinsic_constants = 1.0 / (transitions.g[i][match_upper_states] * transitions.E.u[i][match_upper_states] * transitions.A[i][match_upper_states]) #Get constants for calculating the intrinsic ratios
+			intrinsic_constants =  (transitions.g[i][match_upper_states] * transitions.E.diff()[i][match_upper_states] * transitions.A[i][match_upper_states]) #Get constants for calculating the intrinsic ratios
 			#Nsigma = transitions.Nsigma[i][match_upper_states] #Grab uncertainity in column densities
 			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
 				A_delta_lambda = -2.5*log10((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1])) #Calculate differential extinction between two H2 lines
 				sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[1]/F[1])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 				pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
 				pairs.append(pair) #Save a single pair
+				wave_sets.append(waves)
 				n_doubles_found = n_doubles_found + 1
+				observed_to_intrinsic.append((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1]))
 			elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
 				#Pair 1
 				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
@@ -129,28 +134,42 @@ def fit_extinction_curve(transitions):
 					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[1]/F[1])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 					pair = differential_extinction([waves[0], waves[1]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
 					pairs.append(pair) #Save a single pair
+					observed_to_intrinsic.append((F[0]/F[1]) / (intrinsic_constants[0]/intrinsic_constants[1]))
 				#Pair 2
 				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
 					A_delta_lambda = -2.5*log10((F[0]/F[2]) / (intrinsic_constants[0]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
 					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[0]/F[0])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 					pair = differential_extinction([waves[0], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
 					pairs.append(pair) #Save a single pair
+					observed_to_intrinsic.append((F[0]/F[2]) / (intrinsic_constants[0]/intrinsic_constants[2]))
 				#Pair 3
 				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
 					A_delta_lambda = -2.5*log10((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2])) #Calculate differential extinction between two H2 lines
 					sigma_A_delta_lambda = (2.5 / log(10.0)) * sqrt( (Fsigma[1]/F[1])**2 + (Fsigma[2]/F[2])**2 ) #Calculate uncertainity in the differential extinction between two H2 lines
 					pair = differential_extinction([waves[1], waves[2]], A_delta_lambda, sigma_A_delta_lambda) #Store wavelengths, differential extinction, and uncertainity in a differential_extinction object
 					pairs.append(pair) #Save a single pair
+					observed_to_intrinsic.append((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2]))
+				wave_sets.append(waves)
 				n_trips_found = n_trips_found + 1
+	figure(1)
 	clf() #Clear plot field
 	for pair in pairs: #Loop through each pair
 		pair.fit_curve()
 		plot(alpha, pair.A_K)
 	xlabel('Alpha')
 	ylabel('$A_K$')
-	ylim([-2,20])
-	suptitle('V = ' + str(V))
-	stop()
+	ylim([0,20])
+	figure(2)
+	clf()
+	for pair in pairs: #Loop through each pair
+		plot(pair.waves, [0,pair.A])
+	#suptitle('V = ' + str(V))
+	a = input('What value of alpha do you want to use? ')
+	A_K = input('What value of A_K do you want to use?') 
+	A_lambda = A_K * transitions.wave**(-a) / lambda0**(-a)
+	transitions.F = transitions.F * 10**(0.4*A_lambda)
+	transitions.sigma = transitions.sigma * 10**(0.4*A_lambda)
+	#stop()
 	print 'Number of pairs from same upper state = ', n_doubles_found
 	print 'Number of tripples from same upper state = ', n_trips_found
 	
@@ -163,7 +182,8 @@ class differential_extinction:
 		self.A = A #Store differential extinction
 		self.sigma = sigma #Store uncertainity in differential extinction A
 	def fit_curve(self):
-		constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
+		constants = lambda0**(-alpha) / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) )
+		#constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
 		self.A_K = self.A * constants #calculate extinction for a given power law alpha
 		self.sigma_A_K = self.sigma * constants #calculate extinction for a given power law alpha
 					
@@ -193,8 +213,10 @@ class h2_transitions:
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
 	def calculate_column_density(self, normalize=True): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
-		self.N = self.F / (self.g * self.E.u * h * c * self.A)
-		self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
+		#self.N = self.F / (self.g * self.E.u * h * c * self.A)
+		#self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
+		self.N = self.F / (self.g * self.E.diff() * h * c * self.A)
+		self.Nsigma = self.sigma /  (self.g * self.E.diff() * h * c * self.A)
 		if normalize: #By default normalize to the 1-0 S(1) line, set normalize = False if using absolute flux calibrated data
 			N_10_S1 = self.N[self.label == '1-0 S(1)'] #Grab column density derived from 1-0 S(1) line
 			self.N = self.N / N_10_S1 #Normalize column densities
@@ -245,16 +267,16 @@ class h2_transitions:
    	def make_latex_table(self, output_filename, s2n_cut = 3.0): #Output a latex table of column densities for each H2 line
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{lrrc}")
+   		lines.append(r"\begin{longtable}{lrrr}")
    		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
    		#lines.append("\begin{scriptsize}")
    		#lines.append(r"\begin{tabular}{cccc}")
    		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{1-0 S(1)}} \right)$ \\")
+   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny 1-0 S(1)}} \right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endfirsthead")
    		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{1-0 S(1)}} \right)$ \\")
+   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny 1-0 S(1)}} \right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endhead")
    		lines.append(r"\hline")
