@@ -13,9 +13,10 @@ single_temp = 1500.0 #K
 single_temp_y_intercept = 22.0
 alpha = arange(0.0, 10.0, 0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
 lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
-wave_thresh = 0.5 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
+wave_thresh = 0.0 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
+cloudy_dir = '/Users/kfkaplan/Dropbox/cloudy/'
 cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -173,6 +174,25 @@ def fit_extinction_curve(transitions):
 	print 'Number of pairs from same upper state = ', n_doubles_found
 	print 'Number of tripples from same upper state = ', n_trips_found
 	
+def import_cloudy(): #Import cloudy model from cloudy directory
+	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model
+	model = paths.readline().split(' ')[0]
+	distance = float(paths.readline().split(' ')[0])
+	inner_radius = float(paths.readline().split(' ')[0])
+	slit_area = float(paths.readline().split(' ')[0])
+	data_dir =  paths.readline().split(' ')[0]
+	plot_dir = paths.readline().split(' ')[0]
+	table_dir =  paths.readline().split(' ')[0]
+	paths.close()
+	filename = data_dir+model+".h2.coldens" #Name of file to open
+	#stop()
+	v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
+	h2_transitions = make_line_list() #Make H2 transitions object
+	for i in xrange(len(v)): #Loop through each rovibrational energy level
+		found_transitions = (h2_transitions.V.u == v[i]) & (h2_transitions.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
+		h2_transitions.N[found_transitions] = N_over_g[i] #Set column density of transitions
+	h2_transitions.N = h2_transitions.N / h2_transitions.N[h2_transitions.label == '1-0 S(1)']
+	return(h2_transitions)
 	
 		    
 ##Store differential extinction between two transitions from the same upper state
@@ -257,6 +277,7 @@ class h2_transitions:
 		for i in xrange(len(labels)): #Loop through each line
 			matched_line = (self.label == labels[i]) #Match to H2 line
 			self.F[matched_line] = flux[i] #Set flux to flux from model
+
 	def quick_plot(self): #Create quick boltzmann diagram for previewing and testing purposes
 		nonzero = self.N != 0.0
 		clf()
@@ -325,17 +346,28 @@ class h2_transitions:
 		residuals = e**log_N - e**y #Calculate residuals in fit, but put back in linear space
 		sigma_residuals = sqrt( (e**(y + y_sigma) - e**y)**2 + (e**(log_N + log_N_sigma)-e**log_N)**2 ) #Calculate uncertainity in residuals from adding uncertainity in fit and data points together in quadarature
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-   	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=1.0, normalize=True, savepdf=True,
-   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=0., fname=''): #Make simple plot first showing all the different rotational ladders for a constant V
+	def compare_model(self, h2_model): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data
+		h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=True) #Plot model points as empty symbols
+		self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+   	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, empty_fill =False, full_fill=False,
+   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=0., fname='', clear=True): #Make simple plot first showing all the different rotational ladders for a constant V
 		if fname=='': #Automatically give file name if one is not specified by user
 			fname = self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			nonzero = self.N != 0.0
-			clf()
+			if clear: #User can specify if they want to clear the plot
+				clf()
 			symbsize = 9 #Size of symbols on excitation diagram
 			labelsize = 18 #Size of text for labels
-			orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
-			parafill = 'none'
+			if orthopara_fill:  #User can specify how they want symbols to be filled
+				orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
+				parafill = 'none'
+			elif empty_fill:
+				orthofill = 'none' #How symbols on excitation diagram are filled, 'full' vs 'none'
+				parafill = 'none'
+			else:
+				orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
+				parafill = 'full'
 			if V == [-1]: #If user does not specify a specific set of V states to plot...
 				use_upper_v_states = unique(self.V.u) #plot every one found
 			else: #or else...

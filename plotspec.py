@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d, UnivariateSpline #For interpolating
 import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
-#from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
+from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
@@ -28,7 +28,7 @@ except ImportError:
 #save_path = '/home/kfkaplan/Desktop/results/'
 #pipeline_path = '/Volumes/IGRINS_data/plp-testing/'#Define path to pipeline directory where reduced data is stored
 #pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
-pipeline_path = '/Volumes/IGRINS_data/plp-2.1-alpha.1/'
+pipeline_path = '/Volumes/IGRINS_data/plp-2.1-alpha.2/'
 save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files
 read_variance = True #Boolean that tells code to use variance for 2D maps (or not) NOTE: This is an experimental feature and not yet implemented in the official pipeline.
 #default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
@@ -67,12 +67,17 @@ save = save_class() #Create object user can change the name to
 #Artifically redden a spectrum
 def redden(H, K, waves, flux):
 	alpha = 2.14 #Slope of near-infrared extinction law from Stead & Hoare (2009)
+	#alpha = 1.75 #Slope from older literature
 	lambda_H = 1.651 #Effective wavelength of H band determiend from Stead & Hoare (2009)
-	lambda_K = 2.159 #Effective wavelength of H band determiend from Stead & Hoare (2009)
+	lambda_K = 2.159 #Effective wavelength of K band determiend from Stead & Hoare (2009)
+	#lambda_H = 1.662 #Effective wavelength of H band filter given by 2MASS (http://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec6_4a.html)
+	#lambda_K = 2.159  #Effective wavelength of K band filter given by 2MASS (http://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec6_4a.html)
 	vega_H = -0.03 #Vega H band magnitude, from Simbad
 	vega_K = 0.13 #Vega K band magnitude, from Simbad
 	E_HK = (H-K) - (vega_H-vega_K)  #Calculate E(H-K) = (H-K)_observed - (H-K)_intrinsic, intrinsic = Vega in this case
+	#E_HK = 0.0 #Turn off artificial reddening for testing purposes
 	reddened_flux = flux * 10**( -0.4 * (E_HK/(lambda_H**(-alpha)-lambda_K**(-alpha))) * waves**(-alpha) ) #Apply artificial reddening
+	#stop()
 	return reddened_flux
 
 #Mask Hydrogen absorption lines in A0V standard star continuum, used during relative flux calibration
@@ -92,38 +97,97 @@ def mask_hydrogen_lines(wave, flux):
 	else:
 		return flux #If nothing is masked, return the flux unmodified
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, quality_cut = False, show_plots=True, tweak_test = False, no_flux = False):
+def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False):
+	# #Read in Vega Data
+	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
+	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
+	vega_wave = vega_wave / 1e3 #convert angstroms to microns
+	interp_vega_flux = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
 	#Set up vega continuum
+	HI_lines = lines('HI.dat', delta_v=delta_v) #Load H I line list, pass delta v if specified by user
+	g = Gaussian1DKernel(stddev = wave_smooth) #Set up gaussian smoothing of Vega H I lines, here v_smooth = std deviation of gaussian used for smoothing in units of km/s
+	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
+	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega
 	y = [2493670., 1950210., 1584670., 1512410., 1406170. , 1293900., 854857., 706839., 589023., 494054., 417965., 356822., 306391.]
 	interpolate_vega_continuum = interp1d(x, y, kind='cubic', bounds_error=False)
+	intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale * (vega_flux / interpolate_vega_continuum(vega_wave)-1.0),  bounds_error=False)
+	# #Scale and smooth Vega HI Lines to try to match 
+	# for i in xrange(len(HI_lines.lab_wave)): #Loop through each H I line and paint each line onto a synthetic A0V spectrum based on scaling and convolving the model vega spectrum
+	# 	lab_w = HI_lines.lab_wave[i] #Store current wavelength of current H I line
+	# 	if lab_w > 1.52: #Run only lines > 1.5 um to avoid scaling around lines that are super weak.
+	# 		if i == 1: #If using the first line make the blue side -2000 km/s and redside half way to next line
+	# 			rw = HI_lines.lab_wave[i+1] #Find wavelength of redward adjacent line
+	# 			rs = c*( (0.5*(lab_w + rw) / lab_w) -1.0) #Find velocity between current and redward ajacent line
+	# 			velocity_range = [-3000.0, rs] #Store velocity range for this line
+	# 		elif i == len(HI_lines.lab_wave)-1: #If using the last line make the blue side half way to previous line and +2000 km/s on red side
+	# 			bw = HI_lines.lab_wave[i-1]  #Find wavelength of blueward adjacent line
+	# 			bs = c*( (0.5*(lab_w + bw) / lab_w) -1.0)  #Find velocity between current and blueward ajacent line
+	# 			velocity_range = [bs ,3000.0]  #Store velocity range for this line
+	# 		else:  #Normally make velocity range half way to adjascent lines
+	# 			rw = HI_lines.lab_wave[i+1] #Find wavelength of redward adjacent line
+	# 			rs = c*( (0.5*(lab_w + rw) / lab_w) -1.0)  #Find velocity between current and redward ajacent line
+	# 			bw = HI_lines.lab_wave[i-1] #Find wavelength of blueward adjacent line
+	# 			bs = c*( (0.5*(lab_w + bw) / lab_w) -1.0)  #Find velocity between current and blueward ajacent line
+	# 			velocity_range = [bs, rs]  #Store velocity range for this line
+	# 		velocity = c*((waves/HI_lines.wave[i])-1.0) #Set wavelength array to be central velocities 
+	# 		interpolated_line_profile = interp1d(velocity, 1.0+y_scale*(vega_norm-1.0), bounds_error=False)  #Save line profile
+	# 		goodpix = (velocity >= velocity_range[0]) & (velocity <= velocity_range[1]) #Find pixels inside of velocity range
+	# 		HI_line_profiles[goodpix] = HI_line_profiles[goodpix] + interpolated_line_profile(velocity[goodpix]) -1.0#Add line profile to synthetic spectrum, apply gaussian smoothing in velocity space
+	# 		#stop()
+	#a0v_synth_spec = interp1d(waves, interpolate_vega_continuum(waves) * HI_line_profiles, bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
+	#a0v_synth_cont = interp1d(waves, HI_line_profiles, bounds_error=False)
+	a0v_synth_cont =  interp1d(waves, redden(H, K, waves, interpolate_vega_continuum(waves)), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
+	if wave_smooth > 0.:
+		a0v_synth_spec =  interp1d(waves, redden(H, K, waves, convolve(intepolate_vega_lines(waves)*interpolate_vega_continuum(waves), g)), kind='linear', bounds_error=False)
+	else: 
+		a0v_synth_spec =  interp1d(waves, redden(H, K, waves, intepolate_vega_lines(waves)*interpolate_vega_continuum(waves)), kind='linear', bounds_error=False)
+
 	#Onto calibrations...
 	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
-	if num_dimensions == 2:
+	if num_dimensions == 2: #If number of dimensions is 2D
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
-	clf()
-	for i in xrange(std.n_orders): #Loop through each order
-		if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-			goodpix = std_flattened.orders[i].flux > .05
-			badpix = ~goodpix
-			std.orders[i].flux[badpix] = nan
-		#std_continuum =  mask_hydrogen_lines(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux) #Get back continuum of standard star by dividing it by it's own telluric correction, and interpolate resulting continuum over any H I lines
-		waves = std.orders[i].wave
-		a0v_continuum = std.orders[i].flux / std_flattened.orders[i].flux #Get A0V continuum by dividing it by its own telluric correction
-		vega_continuum = interpolate_vega_continuum(waves) #Get vega continuum
-		reddened_vega_continuum = redden(H, K, waves, vega_continuum) #Articially redden Vega spectrum to A0V being used
-		relative_flux_calibration = reddened_vega_continuum / a0v_continuum
-		if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-			std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-			if read_variance:
-				std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
-		if not no_flux: #As long as user does not specify doing a flux calibration
-			sci.orders[i].flux = sci.orders[i].flux * relative_flux_calibration/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
-		else:  #Else if user does not want to do a flux calibration, just do a telluric correction
-			sci.orders[i].flux = sci.orders[i].flux / (std_flattened.orders[i].flux)
-		if read_variance or num_dimensions == 1:
-			sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-			sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+	with PdfPages(save.path + 'check_flux_calib.pdf') as pdf:
+		clf() 
+		plot(vega_wave, vega_flux, '--', color='blue')
+		plot(vega_wave, vega_cont, '--', color='blue')
+		plot(waves, a0v_synth_cont(waves), color='gray')
+		plot(waves, a0v_synth_spec(waves), color='black')
+		xlim([min(waves), max(waves)])
+		ylim([0., max(a0v_synth_cont(waves))])
+		pdf.savefig()
+		for i in xrange(std.n_orders): #Loop through each order
+			if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
+				goodpix = std_flattened.orders[i].flux > .05
+				badpix = ~goodpix
+				std.orders[i].flux[badpix] = nan
+			#std_continuum =  mask_hydrogen_lines(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux) #Get back continuum of standard star by dividing it by it's own telluric correction, and interpolate resulting continuum over any H I lines
+			waves = std.orders[i].wave
+			#a0v_continuum = std.orders[i].flux / std_flattened.orders[i].flux #Get A0V continuum by dividing it by its own telluric correction
+			#vega_continuum = interpolate_vega_continuum(waves) #Get vega continuum
+			#reddened_vega_continuum = redden(H, K, waves, vega_continuum) #Articially redden Vega spectrum to A0V being used
+			#relative_flux_calibration = reddened_vega_continuum / a0v_continuum
+			#reddened_a0v_synth_spec = redden(H, K, waves, a0v_synth_spec(waves)) #Articially redden synthetic A0V spectrum to A0V being used
+			#relative_flux_calibration = std.orders[i].flux / reddened_a0v_synth_spec #Calculate relative flux calibraiton & telluric correction
+			relative_flux_calibration = (std.orders[i].flux / a0v_synth_spec(waves))
+			clf()
+			plot(waves, std.orders[i].flux, color='red')
+			plot(waves, std.orders[i].flux * (a0v_synth_cont(waves)/a0v_synth_spec(waves)), color='black')
+			plot(waves, std.orders[i].flux / std_flattened.orders[i].flux, color='blue')
+			if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
+				std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
+				if read_variance:
+					std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+			if not no_flux: #As long as user does not specify doing a flux calibration
+				sci.orders[i].flux =  sci.orders[i].flux / relative_flux_calibration   #Apply telluric correction and flux calibration
+				#sci.orders[i].flux = sci.orders[i].flux * relative_flux_calibration/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
+			#else:  #Else if user does not want to do a flux calibration, just do a telluric correction
+			#	sci.orders[i].flux = sci.orders[i].flux / (std_flattened.orders[i].flux)
+			if read_variance or num_dimensions == 1:
+				sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+				sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+			#stop()
+			pdf.savefig()
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
@@ -794,7 +858,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
+def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, y_scale=1.0, wave_smooth=0.0, twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
 	#Make 1D spectrum object for standard star
 	H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
 	K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
@@ -831,9 +895,9 @@ def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, twodim=True, usestd=True
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
-		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, show_plots=False, no_flux=no_flux) #For 1D spectrum
+		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #For 1D spectrum
 		if twodim: #If user specifies this object has a 2D spectrum
-			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, show_plots=False, no_flux=no_flux) #Run for 2D spectrum
+			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #Run for 2D spectrum
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
