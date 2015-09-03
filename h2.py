@@ -4,6 +4,7 @@ from pylab import *
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
 #from astropy.modeling import models, fitting #Import astropy models and fitting for fitting linear functions for tempreatures (e.g. rotation temp)
 from scipy.optimize import curve_fit
+from scipy.interpolate import interp1d
 import copy
 from bottleneck import *
 
@@ -99,9 +100,22 @@ def make_line_list():
 	transitions = h2_transitions(J_obj, V_obj, E_obj, A) #Create main transitions object
 	return transitions #Return transitions object
 
+#Iterate adding extinction curves until you are satisfied
+def iterate_extinction_curve(transitions):
+	a = input('What value of alpha do you want to use? ') #Prompt from user what alpha should be
+	A_K = input('What value of A_K do you want to use? ') #Prompt user for A_K
+	while a != 0.0:  #Loop until user is satisfied with extinction correction
+		fit_extinction_curve(transitions, a=a, A_K=A_K) #Try fitting previously inputted extinction curve, plot results
+		a = input('What value of alpha do you want to use? (0. to stop iteration) ') #Prompt from user what alpha should be
+		A_K = input('What value of A_K do you want to use? ') #Prompt user for A_K
+
+
 #Definition that takes all the H2 lines with determined column densities and calculates as many differential extinctions as it can between
 #pairs of lines that come from the same upper state, and fits an extinction curve (power law here) to them
-def fit_extinction_curve(transitions):
+def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
+	figure(1)
+	clf() #Clear plot field
+
 	n_doubles_found = 0 #Count doubles (pair from same upper state)
 	n_trips_found = 0 #Count trips
 	#i = (transitions.N != 0.0) & (transitions.s2n > 10.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
@@ -152,24 +166,40 @@ def fit_extinction_curve(transitions):
 					observed_to_intrinsic.append((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2]))
 				wave_sets.append(waves)
 				n_trips_found = n_trips_found + 1
-	figure(1)
-	clf() #Clear plot field
-	for pair in pairs: #Loop through each pair
-		pair.fit_curve()
-		plot(alpha, pair.A_K)
-	xlabel('Alpha')
-	ylabel('$A_K$')
-	ylim([0,20])
-	figure(2)
-	clf()
-	for pair in pairs: #Loop through each pair
-		plot(pair.waves, [0,pair.A])
-	#suptitle('V = ' + str(V))
-	a = input('What value of alpha do you want to use? ')
-	A_K = input('What value of A_K do you want to use?') 
+
+			for pair in pairs: #Loop through each pair
+				#if pair.s2n > 0.0:
+				pair.fit_curve()
+				plot(alpha, pair.A_K, color=color_list[V], label = 'V = '+str(V) + ' J = ' + str(J))
+				plot(alpha, pair.A_K + pair.sigma_A_K, '--', color=color_list[V])
+				plot(alpha, pair.A_K - pair.sigma_A_K, '--', color=color_list[V])
+				f = interp1d(alpha, pair.A_K)
+				g = interp1d(alpha, pair.sigma_A_K)
+				print 'V = ', str(V), 'J = ', str(J),' at alpha=2, A_K = ', f(2.0), '+/-', g(2.0)
+			pairs  = []
+		xlabel('Alpha')
+		ylabel('$A_K$')
+		legend()
+		ylim([0,20])
+	#show()
+	#figure(2)
+	#clf()
+	#for pair in pairs: #Loop through each pair
+	#	plot(pair.waves, [0,10**(0.4*pair.A)])
+	##show()
+	#print 'V=', V
+	#pairs = []
+	stop()
+
+	if a == 0.0: #If user does not specify alpha to use
+		a = input('What value of alpha do you want to use? ') #Prompt from user what alpha should be
+	if A_K == 0.0: #If user doesn onot specify what the K-band extinction A_K should be
+		A_K = input('What value of A_K do you want to use? ') #Prompt user for A_K
 	A_lambda = A_K * transitions.wave**(-a) / lambda0**(-a)
 	transitions.F = transitions.F * 10**(0.4*A_lambda)
 	transitions.sigma = transitions.sigma * 10**(0.4*A_lambda)
+	#suptitle('V = ' + str(V))
+
 	#stop()
 	print 'Number of pairs from same upper state = ', n_doubles_found
 	print 'Number of tripples from same upper state = ', n_trips_found
@@ -201,6 +231,7 @@ class differential_extinction:
 		self.waves = waves  #Store the wavleneghts as lamda[0] and lambda[1]
 		self.A = A #Store differential extinction
 		self.sigma = sigma #Store uncertainity in differential extinction A
+		self.s2n = A / sigma
 	def fit_curve(self):
 		constants = lambda0**(-alpha) / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) )
 		#constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
@@ -324,7 +355,8 @@ class h2_transitions:
 	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0.): #Fit rotation temperature to a given ladder in vibration
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
 		if rot_temp_energy_limit > 0.: #If user specifies to cut rotation temp fit, use that....
-			usepts = T < rot_temp_energy_limit
+			usepts = (T < rot_temp_energy_limit) & isfinite(log_N)
+			print 'debug time! Log_N[usepts]=', log_N[usepts]
 			fit, cov = curve_fit(linear_function, T[usepts], log_N[usepts], sigma=log_N_sigma[usepts], absolute_sigma=False) #Do weighted linear regression fit
 		else: #Else fit all points
 			fit, cov = curve_fit(linear_function, T, log_N, sigma=log_N_sigma, absolute_sigma=False) #Do weighted linear regression fit
@@ -347,10 +379,25 @@ class h2_transitions:
 		sigma_residuals = sqrt( (e**(y + y_sigma) - e**y)**2 + (e**(log_N + log_N_sigma)-e**log_N)**2 ) #Calculate uncertainity in residuals from adding uncertainity in fit and data points together in quadarature
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
 	def compare_model(self, h2_model): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data
-		h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=True) #Plot model points as empty symbols
-		self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+		fname = self.path + '_compare_model_excitation_diagrams.pdf'
+		with PdfPages(fname) as pdf: #Make a pdf
+			h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=True) #Plot model points as empty symbols
+			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+			pdf.savefig()
+			V = range(1,14)
+			for i in V:
+				self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False)
+				pdf.savefig()
+   	def plot_individual_ladders(self, x_range=[0.,80000.0]): #Plot set of individual ladders in the excitation diagram
+		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
+		with PdfPages(fname) as pdf: #Make a pdf
+			V = range(1,14)
+			for i in V:
+				self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False)
+				pdf.savefig()
    	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, empty_fill =False, full_fill=False,
-   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=0., fname='', clear=True): #Make simple plot first showing all the different rotational ladders for a constant V
+   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., fname='', clear=True): #Make simple plot first showing all the different rotational ladders for a constant V
+
 		if fname=='': #Automatically give file name if one is not specified by user
 			fname = self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -379,7 +426,7 @@ class h2_transitions:
 				else: #Or else by default use colors from the color list defined at the top of the code
 					current_color = color_list[i]
 					current_symbol = 'o'
-				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut)  #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
+				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & isfinite(self.N) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
 					log_N = log(self.N[ortho]) #Log of the column density
@@ -394,7 +441,7 @@ class h2_transitions:
 							for j in xrange(len(log_N)): #Loop through each point to label
 								text(self.T[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 						print 'For ortho v=', i
-						if rot_temp and len(log_N) > 1: #If user specifies fit rotation temperature
+						if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
 							#stop()
 							rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[ortho], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=False, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 							self.rot_T[ortho] = rt #Save rotation temperature for individual lines
@@ -411,7 +458,7 @@ class h2_transitions:
 				else: #Or else by default use colors from the color list defined at the top of the code
 					current_color = color_list[i]
 					current_symbol = '^'
-				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
+				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & isfinite(self.N) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
 					log_N = log(self.N[para]) #Log of the column density
@@ -426,7 +473,7 @@ class h2_transitions:
 							for j in xrange(len(log_N)): #Loop through each point to label
 								text(self.T[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 						print 'For para v=', i
-						if rot_temp and len(log_N) > 1: #If user specifies fit rotation temperature
+						if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
 							rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 							self.rot_T[para] = rt #Save rotation temperature for individual lines
 							self.sig_rot_T[para] = srt #Save rotation tempreature uncertainity for individual lines

@@ -65,18 +65,27 @@ save = save_class() #Create object user can change the name to
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for modifying spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #Artifically redden a spectrum
-def redden(H, K, waves, flux):
+def redden(B, V, H, K, waves, flux):
 	alpha = 2.14 #Slope of near-infrared extinction law from Stead & Hoare (2009)
 	#alpha = 1.75 #Slope from older literature
 	lambda_H = 1.651 #Effective wavelength of H band determiend from Stead & Hoare (2009)
 	lambda_K = 2.159 #Effective wavelength of K band determiend from Stead & Hoare (2009)
 	#lambda_H = 1.662 #Effective wavelength of H band filter given by 2MASS (http://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec6_4a.html)
 	#lambda_K = 2.159  #Effective wavelength of K band filter given by 2MASS (http://www.ipac.caltech.edu/2mass/releases/allsky/doc/sec6_4a.html)
+	vega_B = 0.03 #Vega B band mag, from Simbad
+	vega_V = 0.03 #Vega V band mag, from simbad
 	vega_H = -0.03 #Vega H band magnitude, from Simbad
 	vega_K = 0.13 #Vega K band magnitude, from Simbad
 	E_HK = (H-K) - (vega_H-vega_K)  #Calculate E(H-K) = (H-K)_observed - (H-K)_intrinsic, intrinsic = Vega in this case
+	E_BV = (B-V) - (vega_B-vega_V)  #Calculate E(B-V) = (B-V)_observed - (B-V)_intrinsic, intrinsic = Vega in this case
+	R = 3.09 #Ratio of total/selective extinction from Rieke & Lebofsky (1985)
+	A_V = R * E_BV #Calculate extinction A_V for standard star
+	A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+	l = array([ 0.806,  1.22 ,  1.63 ,  2.19 ,  3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+	extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+	reddened_flux = flux * 10**(-0.4*extinction_curve(waves)*A_V)
 	#E_HK = 0.0 #Turn off artificial reddening for testing purposes
-	reddened_flux = flux * 10**( -0.4 * (E_HK/(lambda_H**(-alpha)-lambda_K**(-alpha))) * waves**(-alpha) ) #Apply artificial reddening
+	#reddened_flux = flux * 10**( -0.4 * (E_HK/(lambda_H**(-alpha)-lambda_K**(-alpha))) * waves**(-alpha) ) #Apply artificial reddening
 	#stop()
 	return reddened_flux
 
@@ -97,7 +106,7 @@ def mask_hydrogen_lines(wave, flux):
 	else:
 		return flux #If nothing is masked, return the flux unmodified
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False):
+def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False):
 	# #Read in Vega Data
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
@@ -137,11 +146,11 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, y_scale=1.0, 
 	# 		#stop()
 	#a0v_synth_spec = interp1d(waves, interpolate_vega_continuum(waves) * HI_line_profiles, bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
 	#a0v_synth_cont = interp1d(waves, HI_line_profiles, bounds_error=False)
-	a0v_synth_cont =  interp1d(waves, redden(H, K, waves, interpolate_vega_continuum(waves)), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
+	a0v_synth_cont =  interp1d(waves, redden(B, V, H, K, waves, interpolate_vega_continuum(waves)), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
 	if wave_smooth > 0.:
-		a0v_synth_spec =  interp1d(waves, redden(H, K, waves, convolve(intepolate_vega_lines(waves)*interpolate_vega_continuum(waves), g)), kind='linear', bounds_error=False)
+		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, convolve(intepolate_vega_lines(waves)*interpolate_vega_continuum(waves), g)), kind='linear', bounds_error=False)
 	else: 
-		a0v_synth_spec =  interp1d(waves, redden(H, K, waves, intepolate_vega_lines(waves)*interpolate_vega_continuum(waves)), kind='linear', bounds_error=False)
+		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, intepolate_vega_lines(waves)*interpolate_vega_continuum(waves)), kind='linear', bounds_error=False)
 
 	#Onto calibrations...
 	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
@@ -858,7 +867,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, y_scale=1.0, wave_smooth=0.0, twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
+def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
 	#Make 1D spectrum object for standard star
 	H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
 	K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
@@ -895,9 +904,9 @@ def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, y_scale=1.0, wave_smooth
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
-		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #For 1D spectrum
+		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #For 1D spectrum
 		if twodim: #If user specifies this object has a 2D spectrum
-			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #Run for 2D spectrum
+			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #Run for 2D spectrum
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
