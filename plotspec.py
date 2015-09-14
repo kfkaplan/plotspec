@@ -980,7 +980,8 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 			interact = raw_input('Set scale to something else (y/n)? ')
 		for i in xrange(sci2d_obj.n_orders):
 			sci1d_obj.orders[i].flux = sci1d_obj.orders[i].flux - oh1d.orders[i].flux * oh_scale
-			sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - oh2d.orders[i].flux * oh_scale
+			sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
+			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - oh2d.orders[i].flux * oh_scale
 			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - (tile(oh1d.orders[i].flux, [slit_length,1]) * oh_scale / float(slit_length))
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
