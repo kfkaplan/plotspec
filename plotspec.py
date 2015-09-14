@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d, UnivariateSpline #For interpolating
 import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
-from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
+from astropy.convolution import convolve, Gaussian1DKernel , Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
@@ -113,7 +113,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	vega_wave = vega_wave / 1e3 #convert angstroms to microns
 	interp_vega_flux = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
 	#Set up vega continuum
-	HI_lines = lines('HI.dat', delta_v=delta_v) #Load H I line list, pass delta v if specified by user
+	#HI_lines = lines('HI.dat', delta_v=delta_v) #Load H I line list, pass delta v if specified by user
 	g = Gaussian1DKernel(stddev = wave_smooth) #Set up gaussian smoothing of Vega H I lines, here v_smooth = std deviation of gaussian used for smoothing in units of km/s
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
@@ -159,7 +159,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	with PdfPages(save.path + 'check_flux_calib.pdf') as pdf:
 		clf() 
 		plot(vega_wave, vega_flux, '--', color='blue')
-		plot(vega_wave, vega_cont, '--', color='blue')
+		#plot(vega_wave, vega_cont, '--', color='green')
 		plot(waves, a0v_synth_cont(waves), color='gray')
 		plot(waves, a0v_synth_spec(waves), color='black')
 		xlim([min(waves), max(waves)])
@@ -332,48 +332,49 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 # 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
+
 ##Attempt to corrrect OH residuals by taking the difference between two sky frames and adding it to the science frame
 #def OH_correction(sci, sky):
 	#for i in xrange(sci.n_orders): #Loop through each order
 		#sci.orders[i].flux = sci.orders[i].flux - sky.orders[i].flux #Apply correction
 	#sci.combine_orders()  #Combine now continuum subracted orders into one long slit spectrum
 	#return sci
-def OH_correction(sky):
-	OH_lines = lines(OH_line_list) #Create OH line list object
-	clf()
-	for order in sky.orders:
-	#for i in xrange(sky.n_orders): #Loop through each order of sky spectrum
-		#found_OH_lines = OH_lines.parse(min(order.wave), max(order.wave)) #Search for possible OH lines in this order
-		#interpolate_order = interp1d(order.wave, order.flux) #Create interpolation object for OH lines
-		#line_peaks_guess = interpolate_order(found_OH_lines.wave) #Guess flux of line peaks for fitting amplitude of 1D gaussians
-		#good_lines = isfinite(line_peaks_guess)
-		#n_found_lines = len(line_peaks_guess[good_lines])
-		#all_fits = zeros(len(order.wave)) #Set up blank array to put the fits onto
-		#for j in xrange(n_found_lines):
-			#g_init =  models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5)
-			##fit_g = fitting.LevMarLSQFitter()
-			##fit_g = fitting.SimplexLSQFitter()
-			#fit_g = fitting.SLSQPLSQFitter()
-			#g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
-			#all_fits = all_fits + g(order.wave)
-		##stop()
-		##g_init = models.Gaussian1D(amplitude=line_peaks_guess[good_lines][0], mean=found_OH_lines.wave[good_lines][0], stddev=2e-5) #Set up first model
-		##if n_found_lines > 1: #If more than one model is needed
-		##	for j in range(1, n_found_lines): #Loop through each model
-		##		g_init = g_init + models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5) #add another model to the now compound model
-		###fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
-		###fit_g = fitting.SLSQPLSQFitter()
-		##fit_g = fitting.SimplexLSQFitter()
-		##g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
-		goodpix = isfinite(order.flux)
-		smooth_fit = UnivariateSpline(order.wave[goodpix], order.flux[goodpix], s=1000, k=3)
-		smoothed_flux = smooth_fit(order.wave)
-		plot(order.wave, order.flux, color='Black') #Test plotting the sky data
-		plot(order.wave, smoothed_flux, color='Red') 
-		plot(order.wave, order.flux - smoothed_flux, color='Blue')
-	stop()
+# def OH_correction(sky):
+# 	OH_lines = lines(OH_line_list) #Create OH line list object
+# 	clf()
+# 	for order in sky.orders:
+# 	#for i in xrange(sky.n_orders): #Loop through each order of sky spectrum
+# 		#found_OH_lines = OH_lines.parse(min(order.wave), max(order.wave)) #Search for possible OH lines in this order
+# 		#interpolate_order = interp1d(order.wave, order.flux) #Create interpolation object for OH lines
+# 		#line_peaks_guess = interpolate_order(found_OH_lines.wave) #Guess flux of line peaks for fitting amplitude of 1D gaussians
+# 		#good_lines = isfinite(line_peaks_guess)
+# 		#n_found_lines = len(line_peaks_guess[good_lines])
+# 		#all_fits = zeros(len(order.wave)) #Set up blank array to put the fits onto
+# 		#for j in xrange(n_found_lines):
+# 			#g_init =  models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5)
+# 			##fit_g = fitting.LevMarLSQFitter()
+# 			##fit_g = fitting.SimplexLSQFitter()
+# 			#fit_g = fitting.SLSQPLSQFitter()
+# 			#g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
+# 			#all_fits = all_fits + g(order.wave)
+# 		##stop()
+# 		##g_init = models.Gaussian1D(amplitude=line_peaks_guess[good_lines][0], mean=found_OH_lines.wave[good_lines][0], stddev=2e-5) #Set up first model
+# 		##if n_found_lines > 1: #If more than one model is needed
+# 		##	for j in range(1, n_found_lines): #Loop through each model
+# 		##		g_init = g_init + models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5) #add another model to the now compound model
+# 		###fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
+# 		###fit_g = fitting.SLSQPLSQFitter()
+# 		##fit_g = fitting.SimplexLSQFitter()
+# 		##g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
+# 		goodpix = isfinite(order.flux)
+# 		smooth_fit = UnivariateSpline(order.wave[goodpix], order.flux[goodpix], s=1000, k=3)
+# 		smoothed_flux = smooth_fit(order.wave)
+# 		plot(order.wave, order.flux, color='Black') #Test plotting the sky data
+# 		plot(order.wave, smoothed_flux, color='Red') 
+# 		plot(order.wave, order.flux - smoothed_flux, color='Blue')
+# 	stop()
 		
-		#for j in xrange(len(found_OH_lines.label)): #Loop through each found OH line
+# 		#for j in xrange(len(found_OH_lines.label)): #Loop through each found OH line
 			
 
 
@@ -672,7 +673,7 @@ class position_velocity:
 
 
 class region: #Class for reading in a DS9 region file, and applying it to a position_velocity object
-	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True):
+	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True, s2n_mask = 0.0, line='', pixel_range=[-10,10]):
 		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		use_background_region = False
 		line_labels =  pv.label #Read out line labels
@@ -685,7 +686,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		pv_shape = shape(pv_data[0,:,:]) #Read out shape of a 2D slice of the pv diagram cube
 		n_lines = len(pv_data[:,0,0]) #Read out number of lines
 		velocity_range = [min(pv.velocity), max(pv.velocity)]
-		if file == '': #If no region file is specified by the user, prompt user for the path to the region file
+		if file == '' and line == '': #If no region file is specified by the user, prompt user for the path to the region file
 			file = raw_input('What is the name of the region file? ')
 		if background == '': #If no background region file is specified by the user, ask if user wants to specify region, and if so ask for path
 			answer = raw_input('Do you want to designate a specific region to measure the median background (y) or just use the whole postage stamp (n)? ')
@@ -697,14 +698,29 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				use_background_region = False
 		if background == 'all': #If user specifies to use whole 
 			use_background_region = False
-		on_region = pyregion.open(file)  #Open region file for reading flux
-		on_mask = on_region.get_mask(shape = pv_shape) #Make mask around region file
-		on_patch_list, on_text_list = on_region.get_mpl_patches_texts() #Do some stuff
+		if s2n_mask == 0.0: #If user specifies to use a region
+			on_region = pyregion.open(file)  #Open region file for reading flux
+			on_mask = on_region.get_mask(shape = pv_shape) #Make mask around region file
+			on_patch_list, on_text_list = on_region.get_mpl_patches_texts() #Do some stuff
+		else: #If user specifies to mask with a specific spectral line's S/N
+			line_for_masking = line_labels == line #Find index of line to weight by
+			s2n = pv_data[line_for_masking,:,:][0] / sqrt(pv_variance[line_for_masking,:,:][0])
+			on_mask = s2n > s2n_mask #Set on mask to be where line is above some s2n threshold
+			off_mask = ~on_mask
+			mask_contours = zeros(shape(s2n)) #Set up 2D array of 1s and 0s that store the mask, 0 = outside mask, 1 = inside mask
+			mask_contours[on_mask] = 1.0
 		if use_background_region: #If you want to use another region to designate the background, read it in here
 			off_region = pyregion.open(background) #Read in background region file
 			off_mask = off_region.get_mask(shape = pv_shape) #Set up mask
 			off_patch_list, off_text_list = off_region.get_mpl_patches_texts() #Do some stuff
 		#figure(figsize=(4.0,3.0), frameon=False) #Set up figure check size
+		#if weight != '': #If user specifies a line to weight by
+		#	g = Gaussian2DKernel(stddev=5) #Set up gaussian smoothing to get rid of any grainyness between pixels
+		#	line_for_weighting = line_labels == weight #Find index of line to weight by
+		#	weights =  convolve(pv_data[line_for_weighting,:,:][0] / pv_variance[line_for_weighting,:,:][0], g) [on_mask] #Weight by the S/N ratio of that line
+		#	
+		#else: #If user specifies no weighting shoiuld be used
+		#	weights = ones(shape(pv_variance[0,:,:])) #Give everything inside the region equal weight
 		with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
 			line_flux = zeros(n_lines) #Set up array to store line fluxes
 			line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
@@ -717,10 +733,15 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
 				frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
 				#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
-				on_data = pv_data[i,:,:][on_mask] #Find data inside the region for grabbing the flux
-				on_variance = pv_variance[i,:,:][on_mask]
+				if s2n_mask > 0.0: #If user specifies a s2n mask
+					shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+					use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+				else:
+					use_mask = on_mask
+				on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
+				on_variance = pv_variance[i,:,:][use_mask]
 				if use_background_region: #If a backgorund region is specified
-					off_data = pv_data[i,:,:][off_mask] #Find data in the background region for calculating the background
+					off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
 					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
 				else: #If no background region is specified by the user, use the whole field 
 					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
@@ -736,7 +757,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					#ylabel('Along slit')
 					ylabel('Position', fontsize=16)
 					#xlabel('Velocity [km s$^{-1}$]')
-					if show_regions: #By default show the 
+					if show_regions and s2n_mask == 0.0: #By default show the 
 						for p in on_patch_list: #Display DS9 regions in matplotlib
 							ax.add_patch(p)
 						for t in on_text_list:
@@ -746,6 +767,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								ax.add_patch(p)
 							for t in off_text_list:
 								ax.add_artist(t)
+					if s2n_mask > 0.: #Plot s2n mask if user sets it
+						contour(roll(mask_contours, shift_mask_pixels, 1))
 					ax = subplot(212) #Turn on "ax", set first subplot
 					pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
 					pdf.savefig() #Add figure as a page in the pdf
@@ -756,6 +779,16 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
 		self.path = path #Save path to 
+	def fit_mask(self, mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal position (in velocity space) for mask for extracting 
+		shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
+		s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
+		for i in xrange(len(shift_pixels)):
+			shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
+			shifted_mask = shifted_mask_contours == 1.0 #Create new mask from shifted mask countours
+			flux = nansum(data[shifted_mask]) - nanmedian(data[~shifted_mask])*size(data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
+			sigma =  sqrt( nansum(variance[shifted_mask]) ) #Calculate sigma from shifted_mask
+			s2n[i] = flux/sigma #Store S/N of mask in this position
+		return shift_pixels[s2n == nanmax(s2n)] #Return pixel shift that maximizes the s2n
 	def make_latex_table(self, output_filename, s2n_cut = 3.0): #Make latex table of line fluxes
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
@@ -785,6 +818,13 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		lines.append(r"\end{longtable}")
 		#lines.append(r"\end{table}")
 		savetxt(output_filename, lines, fmt="%s") #Output table
+	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
+		lines = []
+		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
+		for i in xrange(len(self.label)):
+			lines.append(self.label[i] + "\t%1.5f" % self.wave[i] + "\t%1.3e" % self.flux[i] + "\t%1.3e" % self.sigma[i])
+		savetxt(save.path + output_filename, lines, fmt="%s") #Output Table
+
 
 def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
 	combined_region = copy.deepcopy(region_A) #Start by created the combined region
@@ -860,6 +900,13 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
 		self.path = path #Save path to 
+	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
+		lines = []
+		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
+		for i in xrange(len(self.label)):
+			lines.append(self.label[i] + "\t%1.5f" % self.wave[i] + "\t%1.3e" % self.flux[i] + "\t%1.3e" % self.sigma[i])
+		savetxt(save.path + output_filename, lines, fmt="%s") #Output Table
+
 
 
 
@@ -867,19 +914,22 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
-	#Make 1D spectrum object for standard star
-	H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
-	K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
-	std_obj = H_std_obj #Create master object
-	std_obj.orders = K_std_obj.orders + H_std_obj.orders #Combine orders
-	std_obj.n_orders = K_std_obj.n_orders + H_std_obj.n_orders #Find new total number of orders
-	#Made 1D spectrum for flattened standard star (used for telluric correction)
-	H_stdflat_obj =  makespec(date, 'H', waveno, stdno, std=True) #Read in H-band
-	K_stdflat_obj =  makespec(date, 'K', waveno, stdno, std=True) #Read in K-band
-	stdflat_obj = H_stdflat_obj #Create master object
-	stdflat_obj.orders = K_stdflat_obj.orders + H_stdflat_obj.orders #Combine orders
-	stdflat_obj.n_orders = K_stdflat_obj.n_orders + H_stdflat_obj.n_orders #Find new total number of orders
+def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
+		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
+	if usestd:
+		#Make 1D spectrum object for standard star
+		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
+		K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
+		std_obj = H_std_obj #Create master object=
+		std_obj.orders = K_std_obj.orders + H_std_obj.orders #Combine orders
+		std_obj.n_orders = K_std_obj.n_orders + H_std_obj.n_orders #Find new total number of orders
+		#Made 1D spectrum for flattened standard star (used for telluric correction)
+
+		H_stdflat_obj =  makespec(date, 'H', waveno, stdno, std=True) #Read in H-band
+		K_stdflat_obj =  makespec(date, 'K', waveno, stdno, std=True) #Read in K-band
+		stdflat_obj = H_stdflat_obj #Create master object
+		stdflat_obj.orders = K_stdflat_obj.orders + H_stdflat_obj.orders #Combine orders
+		stdflat_obj.n_orders = K_stdflat_obj.n_orders + H_stdflat_obj.n_orders #Find new total number of orders
 	#Make 1D spectrum object
 	H_sci1d_obj =  makespec(date, 'H', waveno, frameno) #Read in H-band
 	K_sci1d_obj =  makespec(date, 'K', waveno, frameno) #Read in K-band
@@ -900,6 +950,38 @@ def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.
 			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nansum(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
 				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
+	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
+	if oh != 0: #If user specifies a sky correction image number
+		oh1d, oh2d = getspec(date, waveno, oh, oh, usestd=False, make_1d=True) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?)
+		#scaled_oh = oh1d.combospec.flux * oh_scale #Scale OH line
+		if oh_scale == 0.0:
+			interact = 'y'
+			oh_scale = 1.0
+		else:
+			interact = 'n'
+		while interact == 'y' or interact == 'Y': #If user wants to set the scale, allow user to iterate to find the correct scale factor
+			clf()
+			for i in xrange(sci1d_obj.n_orders):
+				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+				xlabel('$\lambda$ [$\mu$m]')
+				ylabel('Relative Flux')
+			print 'Current scale = ', oh_scale
+			oh_scale = float(raw_input('Set scale: '))
+			clf()
+			for i in xrange(sci1d_obj.n_orders):
+				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+				xlabel('$\lambda$ [$\mu$m]')
+				ylabel('Relative Flux')
+			print 'Current scale = ', oh_scale
+			interact = raw_input('Set scale to something else (y/n)? ')
+		for i in xrange(sci2d_obj.n_orders):
+			sci1d_obj.orders[i].flux = sci1d_obj.orders[i].flux - oh1d.orders[i].flux * oh_scale
+			sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - oh2d.orders[i].flux * oh_scale
+			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - (tile(oh1d.orders[i].flux, [slit_length,1]) * oh_scale / float(slit_length))
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
@@ -917,6 +999,8 @@ def getspec(date, waveno, frameno, stdno, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.
 			return sci1d_obj, sci2d_obj #Return both 1D and 2D spectra objects
 		else:
 			return sci1d_obj #Only return 1D spectra object
+
+
 		
 
 
