@@ -735,6 +735,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
 				if s2n_mask > 0.0: #If user specifies a s2n mask
 					shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+					#stop()
 					use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
 				else:
 					use_mask = on_mask
@@ -824,6 +825,17 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		for i in xrange(len(self.label)):
 			lines.append(self.label[i] + "\t%1.5f" % self.wave[i] + "\t%1.3e" % self.flux[i] + "\t%1.3e" % self.sigma[i])
 		savetxt(save.path + output_filename, lines, fmt="%s") #Output Table
+	#~~~~~~~save line ratios~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	def save_ratios(self, to_line='', factor=1.0):
+		if to_line == '': #If user does not specify line to take ratio relative to
+			to_line = self.label[0]  #Take ratio relative to the first line in the 
+		ratios = factor * self.flux / self.flux[self.label == to_line] #Take ratios, multiply by some factor if comparing to some other table (ie. compared to H-beta as found in Osterbrock & Ferland 2006)
+		fname = save.path + 'line_ratios_relative_to_' + to_line + '.dat' #Set up file path name to save
+		printme = [] #Array that will hold file ouptut
+		for i in xrange(len(self.label)): #Loop thorugh each line
+			printme.append(self.label[i] + '/'+ to_line + '\t%1.5f' % ratios[i]) #Save ratio to an array that will be outputted as the .dat file
+		savetxt(fname, printme, fmt="%s") #Output Table, and we're done
+
 
 
 def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
@@ -924,7 +936,6 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 		std_obj.orders = K_std_obj.orders + H_std_obj.orders #Combine orders
 		std_obj.n_orders = K_std_obj.n_orders + H_std_obj.n_orders #Find new total number of orders
 		#Made 1D spectrum for flattened standard star (used for telluric correction)
-
 		H_stdflat_obj =  makespec(date, 'H', waveno, stdno, std=True) #Read in H-band
 		K_stdflat_obj =  makespec(date, 'K', waveno, stdno, std=True) #Read in K-band
 		stdflat_obj = H_stdflat_obj #Create master object
@@ -953,36 +964,47 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
 	if oh != 0: #If user specifies a sky correction image number
 		oh1d, oh2d = getspec(date, waveno, oh, oh, usestd=False, make_1d=True) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?)
-		#scaled_oh = oh1d.combospec.flux * oh_scale #Scale OH line
-		if oh_scale == 0.0:
-			interact = 'y'
-			oh_scale = 1.0
-		else:
-			interact = 'n'
-		while interact == 'y' or interact == 'Y': #If user wants to set the scale, allow user to iterate to find the correct scale factor
-			clf()
-			for i in xrange(sci1d_obj.n_orders):
-				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
-				xlabel('$\lambda$ [$\mu$m]')
-				ylabel('Relative Flux')
-			print 'Current scale = ', oh_scale
-			oh_scale = float(raw_input('Set scale: '))
-			clf()
-			for i in xrange(sci1d_obj.n_orders):
-				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
-				xlabel('$\lambda$ [$\mu$m]')
-				ylabel('Relative Flux')
-			print 'Current scale = ', oh_scale
-			interact = raw_input('Set scale to something else (y/n)? ')
+		if oh_scale == 0.0: #If scale is not specified by user find it automatically (tests so far are promising)
+			#Test automated minimization routine
+			scales = arange(-2,2,0.01)
+			store_chi_sq = zeros(len(scales))
+			for i in xrange(len(scales)):
+				chi_sq = 0.
+				for j in xrange(sci2d_obj.n_orders):
+					weights = oh1d.orders[j].flux
+					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i])
+					#print 'order ', j ,' gives chisq = ', chi_sq
+					store_chi_sq[i] = store_chi_sq[i] + nansum((diff*weights)**2)
+			oh_scale = scales[store_chi_sq == min(abs(store_chi_sq))][0]
+			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
+			print 'OH residual scaling found stop()to be: ', oh_scale
+			
+		# while interact == 'y' or interact == 'Y': #If user wants to set the scale, allow user to iterate to find the correct scale factor
+		# 	clf()
+		# 	for i in xrange(sci1d_obj.n_orders):
+		# 		plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+		# 		plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+		# 		plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+		# 		xlabel('$\lambda$ [$\mu$m]')
+		# 		ylabel('Relative Flux')
+		# 	print 'Current scale = ', oh_scale
+		# 	oh_scale = float(raw_input('Set scale: '))
+		# 	clf()
+		# 	for i in xrange(sci1d_obj.n_orders):
+		# 		plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+		# 		plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+		# 		plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+		# 		xlabel('$\lambda$ [$\mu$m]')
+		# 		ylabel('Relative Flux')
+		# 	print 'Current scale = ', oh_scale
+		# 	interact = raw_input('Set scale to something else (y/n)? ')
 		for i in xrange(sci2d_obj.n_orders):
 			sci1d_obj.orders[i].flux = sci1d_obj.orders[i].flux - oh1d.orders[i].flux * oh_scale
 			sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
 			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - oh2d.orders[i].flux * oh_scale
 			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - (tile(oh1d.orders[i].flux, [slit_length,1]) * oh_scale / float(slit_length))
+
+
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
@@ -1082,24 +1104,26 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], fluxdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False, size = half_block): #Subtract continuum using robust running median
+	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0]): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
 			first_order = True #Keep track of where we are in the so we only create the legend on the first order
 		for order in self.orders: #Apply continuum subtraction to each order seperately
-			old_flux = copy.deepcopy(order.flux) #Make copy of flux array so the original is not modified
+			old_order = copy.deepcopy(order) #Make copy of flux array so the original is not modified
+			if mask_lines != []: #If user supplies a line list
+				old_order = mask_lines(old_order, mask_lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			wave = order.wave #Read n wavelength array
-			median_result_1d = robust_median_filter(old_flux, size = size) #Take a robust running median along the trace, this is the found continuum
-			subtracted_flux = old_flux - median_result_1d #Apply continuum subtraction
+			median_result_1d = robust_median_filter(old_order.flux, size = size) #Take a robust running median along the trace, this is the found continuum
+			subtracted_flux = order.flux - median_result_1d #Apply continuum subtraction
 			if show: #If you want to watch the continuum subtraction
 				if first_order:  #If on the first order, make the legend along with plotting the order
 					plot(wave, subtracted_flux, label='Science Target - Continuum Subtracted', color='black')
-					plot(wave, old_flux, label='Science Target - Continuum Not Subtracted', color='blue')
+					plot(wave, old_order.flux, label='Science Target - Continuum Not Subtracted', color='blue')
 					plot(wave, median_result_1d, label='Continuum Subtraction', color='green')
 					first_order = False #Now that we are done, just plot the ldata for all the other orders without making a long legend
 				else: #Else just plot the order
 					plot(wave, subtracted_flux, color='black')
-					plot(wave, old_flux, color='blue')
+					plot(wave, old_order.flux, color='blue')
 					plot(wave, median_result_1d, color='green')
 			order.flux = subtracted_flux #Replace this order's flux array with one that has been continuum subtracted
 		if show: #If you want to watch the continuum subtraction
@@ -1220,19 +1244,21 @@ class spec2d:
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
 	#This function applies continuum and background subtraction to one order
-	def subtract_continuum(self, show = False, size = half_block):
+	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0]):
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
-			old_flux =  copy.deepcopy(order.flux)
+			old_order =  copy.deepcopy(order)
+			if lines != []: #If user supplies a line list
+				old_order = mask_lines(old_order, lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			#stop()
-			trace = nanmedian(old_flux, axis=1) #Get trace of continuum from median of whole order
+			trace = nanmedian(old_order.flux, axis=1) #Get trace of continuum from median of whole order
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
 			max_y = where(trace == max(trace))[0][0] #Find peak of trace
 			norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
-			median_result_1d = robust_median_filter(old_flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
+			median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
 			median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
 			median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
-			subtracted_flux = old_flux - median_result_2d #Apply continuum subtraction
+			subtracted_flux = order.flux - median_result_2d #Apply continuum subtraction
 			order.flux = subtracted_flux
 		#if show: #Display subtraction in ds9 if user sets show = True
 			#if num_dimensions == 2:
@@ -1412,7 +1438,8 @@ class lines:
 		return subset #Returns copy of object but with only found lines
 
 
-#~~~~~~~Definitions for identifying lines in a spectrum, givin a wavelength and flux
+
+
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~Do a robost running median filter that ignores nan values and outliers, returns result in 1D~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1435,6 +1462,18 @@ def robust_median_filter(input_flux, size = half_block):
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
 			median_result[i] = nanmedian(flux[x_left[i]:x_right[i]])  #Calculate median between x_left and x_right for a given pixel
 	return median_result
+
+#~~~~~~~~~~~~~Mask out lines based on some velocity range, used for not including wide lines in continuum subtraction~~~~~~~~~~~~~~~~~~~~~~~~
+def mask_lines(spec, linelist, vrange =[-10.0,10.0]):
+	sub_linelist = linelist.parse(nanmin(spec.wave), nanmax(spec.wave)) #Pick lines only in wavelength range
+	if len(sub_linelist.wave) > 0: #Only do this if there are lines to subtract, if not just pass through the flux array
+		for line_wave in sub_linelist.wave: #loop through each line 
+			velocity = c * ( (spec.wave - line_wave) /  line_wave )
+			mask = (velocity >= vrange[0]) & (velocity <= vrange[1])
+			#mask = abs(spec.wave - line_wave)  < mask_size #Set up mask around an emission line
+			spec.flux[mask] = nan #Mask emission line
+	return spec #Return flux with lines masked
+
 	
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~ Various commands ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1475,16 +1514,6 @@ def wait():
 	#plot_2d(flux, open = True, new = False, close = False) 
 	#plot_2d(contract, open = False, new = True, close = True)
 	
-##Simple function for masking out lines in wavelength space, returns flux array with lines masked as 'nan'
-#def mask_lines(spec, linelist, mask_size =  0.00006):
-	#sub_linelist = linelist.parse(bottleneck.nanmin(spec.wave), bottleneck.nanmax(spec.wave)) #Pick lines only in wavelength range
-	#if len(sub_linelist.wave) > 0: #Only do this if there are lines to subtract, if not just pass through the flux array
-		#for line_wave in sub_linelist.wave: #loop through each line 
-			#mask = abs(spec.wave - line_wave)  < mask_size #Set up mask around an emission line
-			#spec.flux[mask] = nan #Mask emission line
-		#print 'masked', len(sub_linelist.wave), lines, ' with wavlenegth mask of ', mask_size, 'um'
-	#return spec.flux #Return flux with lines masked
-
 
 # #Definition that is a wrapper for displaying a specturm or image in ds9
 # #Pauses execution of code, continue to close

@@ -115,6 +115,10 @@ def iterate_extinction_curve(transitions):
 def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	figure(1)
 	clf() #Clear plot field
+	figure(2)
+	clf() #Clear plot field
+	figure(3)
+	clf() #Clear plot field
 
 	n_doubles_found = 0 #Count doubles (pair from same upper state)
 	n_trips_found = 0 #Count trips
@@ -170,6 +174,7 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 			for pair in pairs: #Loop through each pair
 				#if pair.s2n > 0.0:
 				pair.fit_curve()
+				figure(1)
 				plot(alpha, pair.A_K, color=color_list[V], label = 'V = '+str(V) + ' J = ' + str(J))
 				plot(alpha, pair.A_K + pair.sigma_A_K, '--', color=color_list[V])
 				plot(alpha, pair.A_K - pair.sigma_A_K, '--', color=color_list[V])
@@ -352,6 +357,24 @@ class h2_transitions:
 		lines.append(r"\end{longtable}")
 		#lines.append(r"\end{table}")
 		savetxt(output_filename, lines, fmt="%s") #Output table
+	def save_table(self): #Output ascii table with data for making an excitation diagram
+		lines = [] #Set up array for saving lines for text file
+		lines.append('#H2 Line\twavelength [um]\tortho/para\tv_u\tJ_u\tE_u\tlog(N/g)-log(N/g)_1-0S(1)\t+sigma\t-sigma') #Header of text file listing all the columns
+		highest_v = max(self.V.u[self.N > 0.0]) #Find highest V level
+		ortho_para = ['para' ,'ortho']
+		for v in range(1,highest_v+1): #Loop through each rotation ladder
+			i = (self.V.u == v) & (self.N > 0.0)  #Find all lines in the current ladder
+			s = argsort(self.J.u[i]) #Sort by upper J level
+			labels = self.label[i][s] #Grab line labels
+			J =  self.J.u[i][s] #Grab upper J
+			N = self.N[i][s] #Grab column density N\
+			E = self.E.u[i][s]
+			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
+			wave = self.wave[i][s] #Grab wavelength of line
+			for j in xrange(len(labels)): #Loop through each rotation ladder
+				lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
+					 '\t%1.3f'  % log10(N[j]) + '\t%1.3f' %  (-log10(N[j]) + log10(N[j]+sig_N[j])) + '\t%1.3f' % (-log10(N[j]) + log10(N[j]-sig_N[j])) )
+		savetxt(self.path + '_H2_column_densities.dat', lines, fmt="%s") #Output table
 	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0.): #Fit rotation temperature to a given ladder in vibration
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
 		if rot_temp_energy_limit > 0.: #If user specifies to cut rotation temp fit, use that....
@@ -385,18 +408,21 @@ class h2_transitions:
 			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
 			pdf.savefig()
 			V = range(1,14)
+			y_range = [nanmin(log10(self.N)), nanmax(log10(self.N))]
 			for i in V:
-				self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False)
+				h2_model.v_plot(V=[i], orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=True) #Plot model points as empty symbols
+				self.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
 				pdf.savefig()
-   	def plot_individual_ladders(self, x_range=[0.,80000.0]): #Plot set of individual ladders in the excitation diagram
+   	def plot_individual_ladders(self, x_range=[0.,0.0]): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
-			V = range(1,14)
+			V = range(0,14)
 			for i in V:
-				self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False)
-				pdf.savefig()
+				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
+					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False,)
+					pdf.savefig()
    	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, empty_fill =False, full_fill=False,
-   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., fname='', clear=True): #Make simple plot first showing all the different rotational ladders for a constant V
+   				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., fname='', clear=True, legend_fontsize=14): #Make simple plot first showing all the different rotational ladders for a constant V
 
 		if fname=='': #Automatically give file name if one is not specified by user
 			fname = self.path + '_excitation_diagram.pdf'
@@ -404,7 +430,7 @@ class h2_transitions:
 			nonzero = self.N != 0.0
 			if clear: #User can specify if they want to clear the plot
 				clf()
-			symbsize = 9 #Size of symbols on excitation diagram
+			symbsize = 7 #Size of symbols on excitation diagram
 			labelsize = 18 #Size of text for labels
 			if orthopara_fill:  #User can specify how they want symbols to be filled
 				orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
@@ -426,8 +452,8 @@ class h2_transitions:
 				else: #Or else by default use colors from the color list defined at the top of the code
 					current_color = color_list[i]
 					current_symbol = 'o'
-				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & isfinite(self.N) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
-				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
+				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
+				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
 					log_N = log(self.N[ortho]) #Log of the column density
 					if sum(self.s2n[ortho]) == 0.:
@@ -458,8 +484,8 @@ class h2_transitions:
 				else: #Or else by default use colors from the color list defined at the top of the code
 					current_color = color_list[i]
 					current_symbol = '^'
-				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & isfinite(self.N) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
-				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
+				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
+				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
 					log_N = log(self.N[para]) #Log of the column density
 					if sum(self.s2n[para]) == 0.:
@@ -495,7 +521,7 @@ class h2_transitions:
 			if y_range[1] != 0.0: #If user specifies a y axis limit, use it
 				ylim(y_range) #Use user specified y axis range
 			if show_legend: #If user does not turn off showing the legend
-				legend(loc=1, ncol=2, fontsize=18, numpoints=1, columnspacing=-0.5, title = 'ortho  para  ladder')
+				legend(loc=1, ncol=2, fontsize=legend_fontsize, numpoints=1, columnspacing=-0.5, title = 'ortho  para  ladder')
 			if plot_single_temp: #Plot a single temperature line for comparison, if specified
 				x = arange(0,20000, 10)
 				plot(x, single_temp_y_intercept - (x / single_temp), linewidth=2, color='orange')
