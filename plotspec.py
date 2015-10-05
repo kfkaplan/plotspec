@@ -1110,8 +1110,8 @@ class spec1d:
 			first_order = True #Keep track of where we are in the so we only create the legend on the first order
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			old_order = copy.deepcopy(order) #Make copy of flux array so the original is not modified
-			if mask_lines != []: #If user supplies a line list
-				old_order = mask_lines(old_order, mask_lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
+			if lines != []: #If user supplies a line list
+				old_order = mask_lines(old_order, lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			wave = order.wave #Read n wavelength array
 			median_result_1d = robust_median_filter(old_order.flux, size = size) #Take a robust running median along the trace, this is the found continuum
 			subtracted_flux = order.flux - median_result_1d #Apply continuum subtraction
