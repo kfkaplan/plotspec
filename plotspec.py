@@ -631,43 +631,6 @@ class position_velocity:
 		sum_along_x = nansum(self.pv[:, y_range[0]:y_range[1], x_range[0]:x_range[1]], axis=2) #Collapse along velocity space
 		total_sum = nansum(sum_along_x, axis=1) #Collapse along slit space
 		return(total_sum) #Return the integrated flux found for each line in the box defined by the user
-	def fitgauss(self, auto=False): #Fit 1D gaussians to the 1D spectra and plot results
-		fwhm = []
-		quality_check_window = 15 #km/s window for quality check
-		fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
-		for i in xrange(self.n_lines): #Loop through each individual line
-			goodpix = isfinite(self.flux[i])
-			flux = self.flux[i][goodpix]
-			velocity = self.velocity[goodpix]
-			if len(flux) > 1:
-				g_init = models.Gaussian1D(amplitude=max(flux), mean=0.0, stddev=8.0) #Initialize gaussian model for this specific line, centered at 0 km/s with a first guess at the dispersion to be the spectral resolution
-				g = fit_g(g_init, velocity, flux) #Fit gaussian to line
-				g_mean = g.mean.value #Grab mean of gaussian fit
-				g_stddev = g.stddev.value
-				g_fwhm = g_stddev * 2.355
-				g_flux = g(velocity) #Grab 
-				g_residuals = flux - g_flux
-				check_pixels = abs(velocity - g_mean) <= quality_check_window
-				if g_fwhm > 0.0 and g_fwhm < 50.0 and sum(abs(g_residuals[check_pixels]))/sum(flux[check_pixels]) < 0.10: #Quality check, gausdsian fit should (mostly) get most of the residual line flux
-					#self.plot_1d_velocity(i+1) #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
-					fwhm.append(g_fwhm)
-					if auto:
-						print 'FWHM = ', g_fwhm
-					else:
-						clf() #Clear plot
-						plot(velocity, flux, color = 'blue')
-						plot(self.velocity, g(self.velocity), color = 'red')
-						plot(velocity, g_residuals, color = 'green')
-						#show()
-						#stop()
-						print 'mean = ', g_mean
-						print 'stddev = ', g_stddev
-						print 'FWHM = ', g_fwhm
-						raw_input('Press enter to continue')
-		print 'Number of lines with decent Gaussian fits = ', len(fwhm)
-		print 'All Lines Median FWHM = ', median(fwhm)
-		print 'All Lines Mean FWHM = ', mean(fwhm)
-		print 'All Lines std-dev FWHM = ', std(fwhm)
 
 
 
@@ -813,7 +776,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
    		for i in xrange(len(self.label)):
    			if self.s2n[i] > s2n_cut:
 				lines.append(r"%1.5f" % self.wave[i] + " & " + self.label[i] + " & $" + "%1.2f" % log10(self.flux[i]/flux_10S1) + r"^{+%1.2f" % (-log10(self.flux[i]/flux_10S1) + log10(self.flux[i]/flux_10S1+self.sigma[i]/flux_10S1)) 
-				   +r"}_{%1.2f" % (-log10(self.flux[i]/flux_10S1) + log10(self.flux[i]/flux_10S1-self.sigma[i]/flux_10S1)) +r"} $ & %1.2f" % self.s2n[i]  + r" \\") 
+				   +r"}_{%1.2f" % (-log10(self.flux[i]/flux_10S1) + log10(self.flux[i]/flux_10S1-self.sigma[i]/flux_10S1)) +r"} $ & %1.1f" % self.s2n[i]  + r" \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
@@ -970,40 +933,35 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 			store_chi_sq = zeros(len(scales))
 			for i in xrange(len(scales)):
 				chi_sq = 0.
-				for j in xrange(sci2d_obj.n_orders):
+				for j in xrange(sci1d_obj.n_orders):
 					weights = oh1d.orders[j].flux
 					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i])
 					#print 'order ', j ,' gives chisq = ', chi_sq
 					store_chi_sq[i] = store_chi_sq[i] + nansum((diff*weights)**2)
 			oh_scale = scales[store_chi_sq == min(abs(store_chi_sq))][0]
 			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
-			print 'OH residual scaling found stop()to be: ', oh_scale
-			
-		# while interact == 'y' or interact == 'Y': #If user wants to set the scale, allow user to iterate to find the correct scale factor
-		# 	clf()
-		# 	for i in xrange(sci1d_obj.n_orders):
-		# 		plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-		# 		plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-		# 		plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
-		# 		xlabel('$\lambda$ [$\mu$m]')
-		# 		ylabel('Relative Flux')
-		# 	print 'Current scale = ', oh_scale
-		# 	oh_scale = float(raw_input('Set scale: '))
-		# 	clf()
-		# 	for i in xrange(sci1d_obj.n_orders):
-		# 		plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-		# 		plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-		# 		plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
-		# 		xlabel('$\lambda$ [$\mu$m]')
-		# 		ylabel('Relative Flux')
-		# 	print 'Current scale = ', oh_scale
-		# 	interact = raw_input('Set scale to something else (y/n)? ')
-		for i in xrange(sci2d_obj.n_orders):
+			print 'OH residual scaling found to be: ', oh_scale
+		with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
+			clf()
+			for i in xrange(sci1d_obj.n_orders): #Save whole spectrum at once
+				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+			xlabel('$\lambda$ [$\mu$m]')
+			ylabel('Relative Flux')
+			pdf.savefig()
+			for i in xrange(sci1d_obj.n_orders): #Then save each order for closer inspection
+				clf()
+				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+				xlabel('$\lambda$ [$\mu$m]')
+				ylabel('Relative Flux')
+				pdf.savefig()
+		for i in xrange(sci1d_obj.n_orders):
 			sci1d_obj.orders[i].flux = sci1d_obj.orders[i].flux - oh1d.orders[i].flux * oh_scale
-			sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
-			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - oh2d.orders[i].flux * oh_scale
-			#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - (tile(oh1d.orders[i].flux, [slit_length,1]) * oh_scale / float(slit_length))
-
+			if twodim: #If user specifies a two dimensional object
+				sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
 
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
@@ -1215,6 +1173,89 @@ class spec1d:
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #Combine spectrum before plotting, if not done already
 		savetxt(save.path + name, transpose([self.combospec.wave, self.combospec.flux])) #Save 1D spectrum as simple .dat file with wavelength and flux in seperate columns
+	def fitgauss(self,line_list, v_range=[-30.0,30.0]): #Fit 1D gaussians to the 1D spectra and plot results
+		fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
+		all_fwhm = array([])
+		all_wave = array([])
+		all_x_pixels = array([])
+		order_count = 0 
+		interp_velocity_grid = arange(v_range[0], v_range[1], 0.1) #Velocity grid to interpolate line profiles onto
+		with PdfPages(save.path + 'check_line_widths.pdf') as pdf:
+			for order in self.orders:
+				parsed_line_list = line_list.parse(min(order.wave), max(order.wave))
+				finite_pixels = isfinite(order.flux) #store which pixels are finite
+				n_lines = len(parsed_line_list.label) #Number of spectral lines
+				fwhm = zeros(n_lines) #Create array to store FWHM of gaussian fits for each line
+				x_pixels = zeros(n_lines) #Create array to store which x pixel the line is centered on
+				for i in xrange(n_lines): #Loop through each individual line
+					line_wave = parsed_line_list.wave[i]
+					x_pixels[i] = where(order.wave >= line_wave)[0][0]
+					all_velocity = c * ( (order.wave - line_wave) /  line_wave )
+					goodpix = finite_pixels & (all_velocity > v_range[0]) & (all_velocity < v_range[1])
+					flux = order.flux[goodpix]
+					velocity =  all_velocity[goodpix]
+					if len(flux) > 2:
+						g_init = models.Gaussian1D(amplitude=max(flux), mean=0.0, stddev=8.0) #Initialize gaussian model for this specific line, centered at 0 km/s with a first guess at the dispersion to be the spectral resolution
+						g = fit_g(g_init, velocity, flux) #Fit gaussian to line
+						g_mean = g.mean.value #Grab mean of gaussian fit
+						g_stddev = g.stddev.value
+						g_fwhm = g_stddev * 2.355
+						g_flux = g(velocity) #Grab 
+						g_residuals = flux - g_flux
+						#check_pixels = abs(velocity - g_mean) <= quality_check_window
+						#if g_fwhm > 0.0 and g_fwhm < 50.0 and sum(abs(g_residuals[check_pixels]))/sum(flux[check_pixels]) < 0.10: #Quality check, gausdsian fit should (mostly) get most of the residual line flux
+						if abs(g_mean) < 3.0 and g_fwhm > 6.0 and g_fwhm < 10.0 and nansum(abs(g_residuals))/abs(nansum(flux)) < 0.3 and nansum(g_flux) > 0.: #Quality check, gausdsian fit should (mostly) get most of the residual line flux
+							#self.plot_1d_velocity(i+1) #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
+							#fwhm.append(g_fwhm)
+							fwhm[i] = g_fwhm
+							clf() #Clear plot
+							title(parsed_line_list.label[i] + ', FWHM='+str(g_fwhm) + ', Wavelength=' + str(line_wave))
+							plot(velocity, flux, color = 'blue', label='Flux')
+							plot(velocity, g(velocity), color = 'red', label='Gaussian')
+							plot(velocity, g_residuals, color = 'green', label='Residuals')
+							interpolate_line_profile = interp1d(velocity, flux, kind='cubic', bounds_error=False) #Interpolate line profile
+							plot(interp_velocity_grid, interpolate_line_profile(interp_velocity_grid), color='blue', label='Interpolation')
+							legend()
+							pdf.savefig()
+							#print 'mean = ', g_mean
+							#print 'stddev = ', g_stddev
+							#print 'FWHM = ', g_fwhm
+				goodfit = fwhm > 0.
+				clf()
+				plot(parsed_line_list.wave[goodfit], fwhm[goodfit], 'o')
+				title('Order = '+str(order_count))
+				xlabel('Wavelength')
+				ylabel('FWHM')
+				xlim([min(order.wave), max(order.wave)])
+				pdf.savefig()
+				clf()
+				plot(x_pixels[goodfit], fwhm[goodfit], 'o')
+				xlim([0, len(order.wave)])
+				title('Order = '+str(order_count))
+				xlabel('x pixel')
+				ylabel('FWHM')
+				pdf.savefig()
+				all_x_pixels = concatenate([all_x_pixels, x_pixels[goodfit]])
+				all_wave = concatenate([all_wave, parsed_line_list.wave[goodfit]])
+				all_fwhm = concatenate([all_fwhm, fwhm[goodfit]])
+				order_count = order_count + 1
+			clf()
+			plot(all_wave, all_fwhm, 'o')
+			title('ALL ORDERS')
+			xlabel('Wavelength')
+			ylabel('FWHM')
+			pdf.savefig()
+			clf()
+			plot(all_x_pixels, all_fwhm, 'o')
+			title('ALL ORDERS')
+			xlabel('x pixel')
+			ylabel('FWHM')
+			pdf.savefig()
+			print 'Number of lines with decent Gaussian fits = ', len(all_fwhm)
+			print 'All Lines Median FWHM = ', median(all_fwhm)
+			print 'All Lines Mean FWHM = ', mean(all_fwhm)
+			print 'All Lines std-dev FWHM = ', std(all_fwhm)
+
 		
 
 
@@ -1483,6 +1524,16 @@ def wait():
 	raw_input('Press Enter to continue.')
 
 
+#Simple linear interpolation over nan values
+def fill_nans(x, y):
+	filled_y = copy.deepcopy(y) #Make copy of y array
+	goodpix = isfinite(y) #Find values of y array not filled with nan
+	badpix = ~goodpix #Find nans
+	interp_y = interp1d(x[goodpix], y[goodpix], bounds_error=False) #Make interpolation object using only finite y values
+	filled_y[badpix] = interp_y(x[badpix]) #Replace nan values with interpolated values
+	return filled_y #And send it back to where it game from
+
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~Currently unused commands ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ##Apply simple telluric correction by dividing the science spectrum by the flattened standard star spectrum
@@ -1555,72 +1606,136 @@ def wait():
 	#return(sci) #Return the new telluric corrected science spectrum
 	
 	
-##Find lines across all orders and saves it as a line list object
-#class find_lines:
-	#def __init__(self, sci, delta_v=0.0):
+#Find lines across all orders and saves it as a line list object
+class find_lines:
+	def __init__(self, sci, delta_v=0.0, v_range=[-20.0, 20.0], s2n_cut = 100):
+		line_waves = array([])
+		clf()
+		interp_velocity_grid = arange(v_range[0], v_range[1], 0.01) #Velocity grid to interpolate line profiles onto
+		master_profile_stack = zeros(size(interp_velocity_grid))
 		#for i in xrange(sci.n_orders): #Loop through each order
-			
-			#line_waves = self.search_order(sci.orders[i].wave, fill_nans(sci.orders[i].flux), axis=0)
-			##flux_continuum_subtracted = self.line_continuum_subtract(sci.orders[i].wave, sci.orders[i].flux, line_waves)
-			##line_waves = self.search_order(sci.orders[i].wave, flux_continuum_subtracted)
+		for order in sci.orders:
+			wave = order.wave
+			flux = order.flux
+			sig = order.noise
+			#flux_filled_nans = fill_nans(wave, flux)
+			line_waves_found_for_order = self.search_order(wave, flux)
+			line_waves = concatenate([line_waves,  line_waves_found_for_order])
+			#interp_flux = interp1d(wave, flux_filled_nans, kind='cubic')
+			for line_wave in line_waves_found_for_order:
+				velocity = c * ( (wave - line_wave) /  line_wave ) #Get velocity of each pixel
+				in_range = (velocity >= 1.1*v_range[0]) & (velocity <= 1.1*v_range[1]) & isfinite(flux) #Isolate pixels in velocity space, near the velocity range desired
+				summed_flux = nansum(flux[in_range]) #Sum flux to check for errors
+				if summed_flux > 0.: #Fix some errors
+					centroid_estimate = abs(nansum(flux[in_range]*velocity[in_range]) /summed_flux) #Find precise centroid of line
+					#velocity = c * ( (wave - line_wave) /  line_wave ) - centroid_estimate #Apply a correction for the line centroid
+					#in_range = (velocity >= 1.1*v_range[0]) & (velocity <= 1.1*v_range[1]) & isfinite(flux) #Isolate pixels in velocity space, near the velocity range desired
+					s2n =  nansum(flux[in_range]) / sqrt(nansum(sig[in_range]**2))
+					if s2n > s2n_cut and centroid_estimate < 0.75:
+						interp_flux = interp1d(velocity[in_range], flux[in_range], kind='cubic', bounds_error=False) #Cubic interpolate over line profile
+						profile = interp_flux(interp_velocity_grid) #Get profile over desired velocity range
+						profile = profile / max(profile) #Normalize profile
+						plot(interp_velocity_grid, profile)
+						master_profile_stack = dstack([master_profile_stack, profile])
+			#stop()
+			#flux_continuum_subtracted = self.line_continuum_subtract(sci.orders[i].wave, sci.orders[i].flux, line_waves)
+			#line_waves = self.search_order(sci.orders[i].wave, flux_continuum_subtracted)
+		#stop()
+		median_profile = nanmedian(master_profile_stack, 2)[0] #Take median 
+		wave = line_waves #Skim over error for now, for some reason waves was = 0.
+		self.label = line_waves.astype('|S8')  #Automatically make simple wavelength labels for the found lines
+		self.wave = wave #Stores (possibly dopper shifted) waves
+		self.lab_wave = line_waves #Save unshifted waves
+		self.profile = median_profile
 		#wave = line_waves*(delta_v/c)  #Shift a line list by some delta_v given by the user
-		#self.label = line_waves.astype('|S8')  #Automatically make simple wavelength labels for the found lines
-		#self.wave = wave #Stores (possibly dopper shifted) waves
-		#self.lab_wave = line_waves #Save unshifted waves
-	##Function finds lines using the 2nd derivitive test and saves them as a line list
-	#def search_order(self, wave, flux):
-		##plot(wave, flux)
-		#fit = UnivariateSpline(wave, flux, s=50.0, k=4) #Fit an interpolated spline
-		##for i in range(5):
-			##neo_flux = fit(wave)
-			##fit = UnivariateSpline(wave, neo_flux, s=50.0, k=4) #Fit an interpolated spline
-		#extrema = fit.derivative().roots() #Grabe the roots (where the first derivitive = 0) of the fit, these are the extrema (maxes and mins)
-		#second_deriv = fit.derivative(n=2) #Take second derivitive of fit where the extrema are for 2nd derivitive test
-		#extrema_sec_deriv = second_deriv(extrema)  #store 2nd derivitives
-		#i_maxima = extrema_sec_deriv < 0. #Apply the concavity theorm to find maxima
+		self.velocity = interp_velocity_grid
+		with PdfPages(save.path + 'save_median_line_profile.pdf') as pdf:
+			#clf()
+			title('N lines used = ' + str(len(master_profile_stack[0,0,:])))
+			ylim([-0.2,1.2])
+			plot(interp_velocity_grid, median_profile, '--', color='Black', linewidth=3)
+			self.gauss = self.median_fit_gauss() #Fit gaussian, report fwhm
+			plot(interp_velocity_grid, self.gauss, ':', color='Red', linewidth=3)
+			pdf.savefig()
+
+		
+
+	#Function finds lines using the 2nd derivitive test and saves them as a line list
+	def search_order(self, wave, flux, per_order=30):
+		#plot(wave, flux)
+		finite = isfinite(flux) #Use only finitie pixels (ignore nans)
+		fit = UnivariateSpline(wave[finite], flux[finite], s=50.0, k=4) #Fit an interpolated spline
+		#for i in range(5):
+			#neo_flux = fit(wave)
+			#fit = UnivariateSpline(wave, neo_flux, s=50.0, k=4) #Fit an interpolated spline
+		extrema = fit.derivative().roots() #Grabe the roots (where the first derivitive = 0) of the fit, these are the extrema (maxes and mins)
+		second_deriv = fit.derivative(n=2) #Take second derivitive of fit where the extrema are for 2nd derivitive test
+		extrema_sec_deriv = second_deriv(extrema)  #store 2nd derivitives
+		i_maxima = extrema_sec_deriv < 0. #Apply the concavity theorm to find maxima
 		#i_minima = extrema_sec_deriv > 0. #Ditto for minima
-		#wave_maxima = extrema[i_maxima]
-		#flux_maxima = fit(wave_maxima) #Grab flux of the maxima
+		wave_maxima = extrema[i_maxima]
+		flux_maxima = fit(wave_maxima) #Grab flux of the maxima
 		#wave_minima = extrema[i_minima]
 		#flux_minima = fit(wave_minima)
-		#flux_smoothed = fit(wave) #Read in spline smoothed fit for plotting
-		##plot(wave, flux_smoothed) #Plot fit
-		##plot(wave_maxima, flux_maxima, 'o', color='red') #Plot maxima found that pass the cut
-		##plot(wave, spline_obj.derivitive(
-		##print 'TEST SMOOTHING CONTINUUM'
-		##for i in range(len(extrema)): #Print results
-			##print extrema[i], extrema_sec_deriv[i]
-		##Now cut out lines that are below a standard deviation cut
-		######stddev_flux = std(flux) #Stddeviation of the pixel fluxes
-		######maxima_stddev = flux_maxima / stddev_flux
-		######good_lines = maxima_stddev > threshold
-		#n_maxima = len(wave_maxima)
-		#distance_to_nearest_minima = zeros(n_maxima)
-		#elevation_check = zeros(n_maxima)
-		#dist_for_elevation_check = 0.00006 #um
-		##height_for_elevation_check = 0.02*max(flux_smoothed) #fraction of height
-		#for i in range(n_maxima):
-			##distance_to_nearest_minima[i] = min(abs(wave_maxima[i] - wave_minima))
-			#peak_height = flux_maxima[i]
-			#left_height = fit(wave_maxima[i] - dist_for_elevation_check)
-			#right_height = fit(wave_maxima[i] + dist_for_elevation_check)
-			##elevation_check[i] = (peak_height > left_height + height_for_elevation_check) and (peak_height > right_height + height_for_elevation_check)
-			#elevation_check[i] = (peak_height > left_height) and (peak_height > right_height)
-		##good_lines = (distance_to_nearest_minima > 0.00001) & (elevation_check == True)
-		#good_lines = elevation_check == True
-		#wave_maxima = wave_maxima[good_lines]
-		#flux_maxima = flux_maxima[good_lines]
-		##plot(wave_maxima, flux_maxima, 'o', color='blue') #Plot maxima found that pass the cut
-		##line_object = found_lines(wave_maxima, flux_maxima)
-		##return [wave_maxima, flux_maxima]
+		flux_smoothed = fit(wave) #Read in spline smoothed fit for plotting
+		#plot(wave, flux_smoothed) #Plot fit
+		#plot(wave_maxima, flux_maxima, 'o', color='red') #Plot maxima found that pass the cut
+		#plot(wave, spline_obj.derivitive(
+		#print 'TEST SMOOTHING CONTINUUM'
+		#for i in range(len(extrema)): #Print results
+			#print extrema[i], extrema_sec_deriv[i]
+		#Now cut out lines that are below a standard deviation cut
+		#####stddev_flux = std(flux) #Stddeviation of the pixel fluxes
+		#####maxima_stddev = flux_maxima / stddev_flux
+		#####good_lines = maxima_stddev > threshold
+		n_maxima = len(wave_maxima)
+		distance_to_nearest_minima = zeros(n_maxima)
+		elevation_check = zeros(n_maxima)
+		dist_for_elevation_check = 0.00007 #um
+		height_fraction = 0.1 #fraction of height
+		for i in range(n_maxima):
+			#distance_to_nearest_minima[i] = min(abs(wave_maxima[i] - wave_minima))
+			peak_height = flux_maxima[i]
+			left_height = fit(wave_maxima[i] - dist_for_elevation_check)
+			right_height = fit(wave_maxima[i] + dist_for_elevation_check)
+			#elevation_check[i] = (peak_height > left_height + height_for_elevation_check) and (peak_height > right_height + height_for_elevation_check)
+			elevation_check[i] = (peak_height > left_height / height_fraction) and (peak_height > right_height / height_fraction)
+		#good_lines = (distance_to_nearest_minima > 0.00001) & (elevation_check == True)
+		good_lines = elevation_check == True
+		wave_maxima = wave_maxima[good_lines]
+		flux_maxima = flux_maxima[good_lines]
+		s = argsort(flux_maxima)[::-1][0:per_order] #Find brightest N per_order (default 15) lines per order
+		#plot(wave_maxima, flux_maxima, 'o', color='blue') #Plot maxima found that pass the cut
+		#line_object = found_lines(wave_maxima, flux_maxima)
+		#return [wave_maxima, flux_maxima]
 		#stop()
-		#return wave_maxima
-	##Function masks out existing lines, then tries to find lines again
-	#def line_continuum_subtract(self, wave, flux, line_waves, line_cut=0.0005):
-		#for line_wave in line_waves: #Mask out each emission line found
-			#line_mask = abs(wave - line_wave)  < line_cut #Set up mask around an emission line
-			#flux[line_mask] = nan #Cut emission line out
-		#fit = UnivariateSpline(wave, flux, s=1e4, k=4) #Smooth remaining continuum
-		#continuum = fit(wave) #Grab smoothed continuum
-		##stop()
-		#return flux - continuum #Return flux with continuum subtracted
+		return wave_maxima[s]
+
+	#Function masks out existing lines, then tries to find lines again
+	def line_continuum_subtract(self, wave, flux, line_waves, line_cut=0.0005):
+		for line_wave in line_waves: #Mask out each emission line found
+			line_mask = abs(wave - line_wave)  < line_cut #Set up mask around an emission line
+			flux[line_mask] = nan #Cut emission line out
+		fit = UnivariateSpline(wave, flux, s=1e4, k=4) #Smooth remaining continuum
+		continuum = fit(wave) #Grab smoothed continuum
+		#stop()
+		return flux - continuum #Return flux with continuum subtracted
+	def parse(self, min_wave, max_wave): #Simple function for grabbing only lines with a certain wavelength range
+		subset = copy.deepcopy(self) #Make copy of this object to parse
+		found_lines = (subset.wave > min_wave) & (subset.wave < max_wave) & (abs(subset.wave - 1.87) > 0.062)   #Grab location of lines only in the wavelength range, while avoiding region between H & K bands
+		subset.lab_wave = subset.lab_wave[found_lines] #Filter out lines outside the wavelength range
+		subset.wave = subset.wave[found_lines]
+		subset.label = subset.label[found_lines]
+		return subset #Returns copy of object but with only found lines
+	def median_fit_gauss(self): #Fit gaussian to median line profile and print results
+		fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
+		g_init = models.Gaussian1D(amplitude=max(self.profile), mean=0.0, stddev=8.0) #Initialize gaussian model for this specific line, centered at 0 km/s with a first guess at the dispersion to be the spectral resolution
+		g = fit_g(g_init, self.velocity, self.profile) #Fit gaussian to line
+		g_mean = g.mean.value #Grab mean of gaussian fit
+		g_stddev = g.stddev.value
+		g_fwhm = g_stddev * 2.355
+		g_flux = g(self.velocity) 
+		g_residuals = self.profile - g_flux
+		print 'Median line profile FWHM: ', g_fwhm
+		return(g(self.velocity)) #Return gaussian fit
+
