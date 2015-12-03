@@ -570,13 +570,22 @@ class h2_transitions:
 		with PdfPages(fname) as pdf: #Make a pdf
 			h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True) #Plot model points as empty symbols
 			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+			xlim([0.,60000.])
 			pdf.savefig()
 			V = range(1,14)
 			y_range = [nanmin(log10(self.N)), nanmax(log10(self.N))]
+			ratio = copy.deepcopy(self)
+			ratio.N = (self.N / h2_model.N)
+			ratio.sigma = (self.sigma / self.N) * ratio.N
 			for i in V:
+				clf()
 				suptitle('v = '+str(i))
 				h2_model.v_plot(V=[i], orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True) #Plot model points as empty symbols
 				self.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+				pdf.savefig()
+				clf()
+				suptitle('v = '+str(i) + ' residuals')
+				ratio.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
 				pdf.savefig()
    	def plot_individual_ladders(self, x_range=[0.,0.0]): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'

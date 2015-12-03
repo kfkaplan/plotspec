@@ -157,7 +157,16 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	if num_dimensions == 2: #If number of dimensions is 2D
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
 	with PdfPages(save.path + 'check_flux_calib.pdf') as pdf:
-		clf() 
+		clf() #Plot Br-gamma 
+		#br_gamma_order = 12
+		#orderS_around_br_gamma = [11, 12, 13] #Orders around Br-Gamma
+		br_gamma_order =  std.orders[11].flux
+		average_around_br_gamma = (std.orders[10].flux +  std.orders[12].flux) / 2.0
+		plot(br_gamma_order, color='red')
+		plot(br_gamma_order * (a0v_synth_cont(std.orders[11].wave)/a0v_synth_spec(std.orders[11].wave)), color='black')
+		plot(average_around_br_gamma, '--', color='blue')
+		pdf.savefig()
+		clf() #Plot Vega model spectrum
 		plot(vega_wave, vega_flux, '--', color='blue')
 		#plot(vega_wave, vega_cont, '--', color='green')
 		plot(waves, a0v_synth_cont(waves), color='gray')
@@ -1062,7 +1071,7 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], fluxdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0]): #Subtract continuum using robust running median
+	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
 			first_order = True #Keep track of where we are in the so we only create the legend on the first order
@@ -1071,8 +1080,16 @@ class spec1d:
 			if lines != []: #If user supplies a line list
 				old_order = mask_lines(old_order, lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			wave = order.wave #Read n wavelength array
-			median_result_1d = robust_median_filter(old_order.flux, size = size) #Take a robust running median along the trace, this is the found continuum
-			subtracted_flux = order.flux - median_result_1d #Apply continuum subtraction
+			if use_poly:
+				p_init = models.Polynomial1D(degree=4)
+				fit_p = fitting.SimplexLSQFitter()
+				nx = len(old_order.flux)
+			 	x = arange(nx)
+				p =  fit_p(p_init, x, old_order.flux)
+				subtracted_flux = order.flux - p(x)
+			else:
+				median_result_1d = robust_median_filter(old_order.flux, size = size) #Take a robust running median along the trace, this is the found continuum
+				subtracted_flux = order.flux - median_result_1d #Apply continuum subtraction
 			if show: #If you want to watch the continuum subtraction
 				if first_order:  #If on the first order, make the legend along with plotting the order
 					plot(wave, subtracted_flux, label='Science Target - Continuum Subtracted', color='black')
@@ -1285,7 +1302,7 @@ class spec2d:
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
 	#This function applies continuum and background subtraction to one order
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0]):
+	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False):
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
 			old_order =  copy.deepcopy(order)
@@ -1296,10 +1313,24 @@ class spec2d:
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
 			max_y = where(trace == max(trace))[0][0] #Find peak of trace
 			norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
-			median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
-			median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
-			median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
-			subtracted_flux = order.flux - median_result_2d #Apply continuum subtraction
+			if use_poly: #If user wants to use polynomial along the x direction
+				p_init = models.Polynomial1D(degree=4)
+				fit_p = fitting.SimplexLSQFitter()
+				nx = len(old_order.flux[0,:])
+				ny = len(old_order.flux[:,0])
+			 	x = arange(nx)
+			 	result_2d = zeros([ny,nx])
+			 	for row in xrange(ny):
+			 		if any(isfinite(old_order.flux[row,:])):
+						#stop()
+						p =  fit_p(p_init, x, old_order.flux[row,:])
+				 		result_2d[row,:] = p(x)
+				subtracted_flux = order.flux - result_2d
+			else: #If user wants to use running median filter
+				median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
+				median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
+				median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
+				subtracted_flux = order.flux - median_result_2d #Apply continuum subtraction
 			order.flux = subtracted_flux
 		#if show: #Display subtraction in ds9 if user sets show = True
 			#if num_dimensions == 2:
