@@ -595,7 +595,7 @@ class h2_transitions:
 				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
 					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False,)
 					pdf.savefig()
-   	def v_plot(self, plot_single_temp = False, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
+   	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		fname='', clear=True, legend_fontsize=14, line=False): #Make simple plot first showing all the different rotational ladders for a constant V
 		if fname == '':
@@ -629,15 +629,18 @@ class h2_transitions:
 				if line: #if user specifies using lines
 					#current_symbol = current_symbol + '-' #Draw a line between each symbol
 					current_symbol = '-'
+				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
+				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
 					log_N = log(self.N[ortho]) #Log of the column density
 					if sum(self.s2n[ortho]) == 0.:
-						plot(self.T[ortho], log_N, current_symbol,  color=current_color, label=' ', markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						plot(self.T[ortho], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
-						errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
 							test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
@@ -651,9 +654,6 @@ class h2_transitions:
 						self.sig_rot_T[ortho] = srt #Save rotation tempreature uncertainity for individual lines
 						self.res_rot_T[ortho] = residuals #Save residuals for individual data points from the rotation tmeperature fit
 						self.sig_res_rot_T[ortho] = sigma_residuals #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)
-				else: #Else if no datapoints are found...
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
-				
 			for i in use_upper_v_states:
 				if nocolor: #If user specifies no color,
 					current_color = 'Black'
@@ -664,15 +664,19 @@ class h2_transitions:
 				if line: #if user specifies using lines
 					#current_symbol = current_symbol + ':' #Draw a line between each symbol
 					current_symbol = ':'
+				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
+				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
 					log_N = log(self.N[para]) #Log of the column density
 					if sum(self.s2n[para]) == 0.:
-						plot(self.T[para], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						plot(self.T[para], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
-						errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						#errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
 							test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
@@ -685,9 +689,6 @@ class h2_transitions:
 						self.sig_rot_T[para] = srt #Save rotation tempreature uncertainity for individual lines
 						self.res_rot_T[para] = residuals #Save residuals for individual data points from the rotation tmeperature fit
 						self.sig_res_rot_T[para] = sigma_residuals #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)						
-				else: #Else if no datapoints are found...
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
-
 			tick_params(labelsize=14) #Set tick mark label size
 			if normalize: #If normalizing to the 1-0 S(1) line
 				ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
