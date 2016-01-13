@@ -433,6 +433,8 @@ class h2_transitions:
 			#N_10_S1 = self.N[self.label == '1-0 S(1)'] #Grab column density derived from 1-0 S(1) line
 			#self.N = self.N / N_10_S1 #Normalize column densities
 			#self.Nsigma = self.Nsigma / N_10_S1 #Normalize uncertainity
+	def calculate_flux(self): #Calculate flux for a given calculated column density (ie. if you set it to thermalize)
+		self.F = self.N * self.g * self.E.diff() * h * c * self.A
 	def normalize(self, label='1-0 S(1)'):
 		normalize_by_this = self.N[self.label == label]  #Grab column density of line to normalize by
 		self.N = self.N / normalize_by_this #Do the normalization
@@ -442,6 +444,7 @@ class h2_transitions:
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
 		self.N = boltzmann_distribution #Set column densities to the boltzmann distribution
 		self.normalize() #Normalize to the 1-0 S(1) line
+		self.calculate_flux() #Calculate flux of new lines after thermalization
 	def makelabel(self): #Make labels for each transition in spectroscopic notation.
 		labels = []
 		for i in xrange(self.n_lines):
@@ -587,13 +590,13 @@ class h2_transitions:
 				suptitle('v = '+str(i) + ' residuals')
 				ratio.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
 				pdf.savefig()
-   	def plot_individual_ladders(self, x_range=[0.,0.0]): #Plot set of individual ladders in the excitation diagram
+   	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			V = range(0,14)
 			for i in V:
 				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
-					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False,)
+					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False, s2n_cut=s2n_cut)
 					pdf.savefig()
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 

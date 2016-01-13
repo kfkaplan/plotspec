@@ -565,21 +565,21 @@ class position_velocity:
 				suptitle(title)
 				imshow(self.pv[i,:,:], cmap='gray')
 				pdf.savefig() #Save as a page in a PDF file
-	def plot_1d_velocity(self, line_index, title='', clear=True, fontsize=18, show_zero=True): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
+	def plot_1d_velocity(self, line_index, title='', clear=True, fontsize=18, show_zero=True, show_x_label=True, show_y_label=True, uncertainity_color='red'): #Plot 1D spectrum in velocity space (corrisponding to a PV Diagram), called when viewing a line
 		if clear: #Clear plot space, unless usser sets clear=False
 			clf() #Clear plot space
 		velocity = self.velocity
 		flux = self.flux[line_index] / 1e3 #Scale flux so numbers are not so big
 		noise = sqrt(self.var1d[line_index]) / 1e3
 		max_flux = nanmax(flux + noise, axis=0) #Find maximum flux in slice of spectrum
-		fill_between(velocity, flux - noise, flux + noise, facecolor = 'red')
+		fill_between(velocity, flux - noise, flux + noise, facecolor = uncertainity_color) #Fill in space between data and +/- 1 sigma uncertainity
 		plot(velocity, flux, color='black') #Plot 1D spectrum slice
 		#plot(velocity, flux + noise, ':', color='red') #Plot noise level for 1D spectrum slice
 		#plot(velocity, flux - noise, ':', color='red') #Plot noise level for 1D spectrum slice
 		if show_zero: #Normally show the zero point line, but if user does not want it, don't plot it
-			plot([0,0], [-0.1*max_flux, max_flux], '--', color='black') #Plot velocity zero point
+			plot([0,0], [-0.2*max_flux, max_flux], '--', color='black') #Plot velocity zero point
 		xlim([-velocity_range, velocity_range]) #Set xrange to be +/- the velocity range set for the PV diagrams
-		ylim([-0.1*max_flux, max_flux]) #Set yrange
+		ylim([-0.20*max_flux, 1.2*max_flux]) #Set yrange
 		if title != '': #Add title to plot showing line name, wavelength, etc.
 			suptitle(title, fontsize=20)
 		#if label != '' and wave > 0.0:
@@ -588,12 +588,14 @@ class position_velocity:
 			#title(label)
 		#elif wave > 0.0:
 			#title("%12.5f" % wave + '$\mu$m')
-		xlabel('Velocity [km s$^{-1}$]', fontsize=fontsize) #Label x axis
+		if show_x_label: #Let user specificy showing x axis
+			xlabel('Velocity [km s$^{-1}$]', fontsize=fontsize) #Label x axis
 		#if self.s2n:
 		#	ylabel('S/N per resolution element (~3.3 pixels)', fontsize=18) #Label y axis as S/N for S/N spectrum
 		#else:
 		#	ylabel('Relative Flux', fontsize=18) #Or just label y-axis as relative flux
-		ylabel('Relative Flux', fontsize=fontsize) #Or just label y-axis as relative flux 
+		if show_y_label:
+			ylabel('Relative Flux', fontsize=fontsize) #Or just label y-axis as relative flux 
 		#draw()
 		#show()
 	def save_fits(self): #Save fits file of PV diagrams
@@ -878,6 +880,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 					print "background_level = ",background_level
 					pdf.savefig() #Add figure as a page in the pdf
 		#dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
+		self.velocity = velocity #Save velocity grid
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
 		self.flux = line_flux #Save line fluxes
@@ -1056,7 +1059,7 @@ class fits_file:
 	def get(self):  #Get fits file data with an easy to call definition
 		return self.data
 
-#Class to store and analyze a 1D spectrum
+#Class to store and analyze a 1D spectrumc
 class spec1d:
 	def __init__(self, fits_wave, fits_spec, fits_var):
 		wavedata = fits_wave.get() #Grab fits data for wavelength out of object
@@ -1292,9 +1295,12 @@ class spec2d:
 			#wave1d = spec2d[1].data[i,:].byteswap().newbyteorder() #Grab wavelength calibration for current order
 			wave1d = wavedata[i,:] #Grab wavelength calibration for current order
 			wave2d = tile(wave1d, [slit_pixel_length,1]) #Create a 2D array storing the wavelength solution, to be appended below the data
-			data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
+			data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			if read_variance:
-				noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+				#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+				noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
 				orders.append( spectrum(wave2d, data2d, noise = noise2d) )
 			else: 
 				orders.append( spectrum(wave2d, data2d) )
@@ -1360,6 +1366,10 @@ class spec2d:
 				#legend()
 			#else:
 				#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
+	def subtract_median_vertical(self): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
+		for i in xrange(self.n_orders-1): #Loop through each order
+			median_along_slit = nanmedian(self.orders[i].flux, axis=0) #Collapse median along slit
+			self.orders[i].flux = self.orders[i].flux - tile(median_along_slit, [self.slit_pixel_length,1]) #Subtract the median
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
 		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
