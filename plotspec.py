@@ -13,7 +13,7 @@ from scipy.interpolate import interp1d, UnivariateSpline #For interpolating
 import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
-from astropy.convolution import convolve, Gaussian1DKernel , Gaussian2DKernel #For smoothing, not used for now, commented out
+from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
@@ -111,10 +111,10 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
 	vega_wave = vega_wave / 1e3 #convert angstroms to microns
-	interp_vega_flux = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
+	#interp_vega_flux = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
 	#Set up vega continuum
 	#HI_lines = lines('HI.dat', delta_v=delta_v) #Load H I line list, pass delta v if specified by user
-	g = Gaussian1DKernel(stddev = wave_smooth) #Set up gaussian smoothing of Vega H I lines, here v_smooth = std deviation of gaussian used for smoothing in units of km/s
+	#
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega
@@ -146,11 +146,14 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	# 		#stop()
 	#a0v_synth_spec = interp1d(waves, interpolate_vega_continuum(waves) * HI_line_profiles, bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
 	#a0v_synth_cont = interp1d(waves, HI_line_profiles, bounds_error=False)
-	a0v_synth_cont =  interp1d(waves, redden(B, V, H, K, waves, interpolate_vega_continuum(waves)), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
+	interpolated_vega_continuum = interpolate_vega_continuum(waves) #grab interpolated continuum once so dn't have to interpolate it again
+	interpolated_vega_lines =  intepolate_vega_lines(waves)
+	a0v_synth_cont =  interp1d(waves, redden(B, V, H, K, waves, interpolated_vega_continuum), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
 	if wave_smooth > 0.:
-		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, convolve(intepolate_vega_lines(waves)*interpolate_vega_continuum(waves), g)), kind='linear', bounds_error=False)
+		g = Gaussian1DKernel(stddev = wave_smooth) #Set up gaussian smoothing of Vega H I lines, here v_smooth = std deviation of gaussian used for smoothing in units of km/s
+		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, convolve(interpolated_vega_lines*interpolated_vega_continuum, g)), kind='linear', bounds_error=False)
 	else: 
-		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, intepolate_vega_lines(waves)*interpolate_vega_continuum(waves)), kind='linear', bounds_error=False)
+		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, interpolated_vega_lines*interpolated_vega_continuum), kind='linear', bounds_error=False)
 
 	#Onto calibrations...
 	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
@@ -169,10 +172,11 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 		clf() #Plot Vega model spectrum
 		plot(vega_wave, vega_flux, '--', color='blue')
 		#plot(vega_wave, vega_cont, '--', color='green')
-		plot(waves, a0v_synth_cont(waves), color='gray')
-		plot(waves, a0v_synth_spec(waves), color='black')
+		premake_a0v_synth_cont = a0v_synth_cont(waves)
+		plot(waves, premake_a0v_synth_cont, color='gray')
+		plot(waves,premake_a0v_synth_cont, color='black')
 		xlim([min(waves), max(waves)])
-		ylim([0., max(a0v_synth_cont(waves))])
+		ylim([0., max(premake_a0v_synth_cont)])
 		pdf.savefig()
 		for i in xrange(std.n_orders): #Loop through each order
 			if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
@@ -180,20 +184,22 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 				badpix = ~goodpix
 				std.orders[i].flux[badpix] = nan
 			#std_continuum =  mask_hydrogen_lines(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux) #Get back continuum of standard star by dividing it by it's own telluric correction, and interpolate resulting continuum over any H I lines
-			waves = std.orders[i].wave
+			waves = std.orders[i].wave #Std wavelengths
+			std_flux = std.orders[i].flux #Std flux
 			#a0v_continuum = std.orders[i].flux / std_flattened.orders[i].flux #Get A0V continuum by dividing it by its own telluric correction
 			#vega_continuum = interpolate_vega_continuum(waves) #Get vega continuum
 			#reddened_vega_continuum = redden(H, K, waves, vega_continuum) #Articially redden Vega spectrum to A0V being used
 			#relative_flux_calibration = reddened_vega_continuum / a0v_continuum
 			#reddened_a0v_synth_spec = redden(H, K, waves, a0v_synth_spec(waves)) #Articially redden synthetic A0V spectrum to A0V being used
 			#relative_flux_calibration = std.orders[i].flux / reddened_a0v_synth_spec #Calculate relative flux calibraiton & telluric correction
-			relative_flux_calibration = (std.orders[i].flux / a0v_synth_spec(waves))
+			interpolated_a0v_synth_spec = a0v_synth_spec(waves)
+			relative_flux_calibration = (std_flux / interpolated_a0v_synth_spec)
 			clf()
-			plot(waves, std.orders[i].flux, color='red')
-			plot(waves, std.orders[i].flux * (a0v_synth_cont(waves)/a0v_synth_spec(waves)), color='black')
-			plot(waves, std.orders[i].flux / std_flattened.orders[i].flux, color='blue')
+			plot(waves, std_flux, color='red')
+			plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')
+			plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
 			if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-				std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
+				std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
 				if read_variance:
 					std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
 			if not no_flux: #As long as user does not specify doing a flux calibration
@@ -391,17 +397,20 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 #Class creates, stores, and displays lines as position velocity diagrams, one of the main tools for analysis
 class position_velocity:
 	def __init__(self, spec1d, spec2d, line_list, s2n=False, make_1d=False, shift_lines=''):
-		slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
+		#slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
+		slit_pixel_length = slit_length #Height of slit in pixels for this target and band
 		wave_pixels = spec2d.wave[0,:] #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
-		min_wave  = nanmin(wave_pixels) #Minimum wavelength
-		max_wave = nanmax(wave_pixels) #maximum wavelength
 		#wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
-		x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
+		#x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
 		interp_velocity = arange(-velocity_range, velocity_range, velocity_res) #Velocity grid to interpolate each line onto
-		show_lines = line_list.parse(min_wave, max_wave) #Only grab lines withen the wavelength range of the current order
-		flux = [] #Set up list of arrays to store 1D fluxes
-		var1d = []
+		show_lines = line_list.parse(min(wave_pixels), max(wave_pixels)) #Only grab lines withen the wavelength range of the current order
+		n_lines = len(show_lines.wave) #Number of spectral lines
+		n_velocity = len(interp_velocity) #Number of velocity points
+		flux = empty([n_lines, n_velocity]) #Set up list of arrays to store 1D fluxes
+		var1d = empty([n_lines, n_velocity])
+		pv = empty([n_lines, slit_pixel_length, n_velocity])
+		var2d =  empty([n_lines, slit_pixel_length, n_velocity])
 		if shift_lines != '': #If user wants to apply a correction in velocity space to a set of lines, use this file shift_lines
 			shift_labels = loadtxt(shift_lines, usecols=[0,], dtype=str, delimiter='\t') #Load line labels to ID each line
 			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
@@ -410,8 +419,9 @@ class position_velocity:
 				show_lines.wave[find_line] = show_lines.wave[find_line] * (-(shift_v[i]/c)+1.0)#Artifically doppler shift the line
 				print shift_labels[i]
 				#stop()
-		for line_wave in show_lines.wave: #Label the lines
-			pv_velocity = c * ( (spec2d.wave - line_wave) /  line_wave ) #Calculate velocity offset for each pixel from c*delta_wave / wave
+		
+		for i in xrange(n_lines): #Label the lines
+			pv_velocity = c * ( (spec2d.wave / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
 			pixel_cut = abs(pv_velocity[0]) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
 			ungridded_velocities = pv_velocity[0, pixel_cut]
 			ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
@@ -419,9 +429,9 @@ class position_velocity:
 			ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
 			if read_variance: #If user specifies read in the 2D variance map
 				ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
-			interp_flux_1d= interp1d(ungridded_velocities, ungridded_flux_1d, kind='linear', bounds_error=False) #Create interp. object for 1D flux
+			#interp_flux_1d= interp1d(ungridded_velocities, ungridded_flux_1d, kind='linear', bounds_error=False) #Create interp. object for 1D flux
 			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
-			interp_variance_1d= interp1d(ungridded_velocities, ungridded_variance_1d, kind='linear', bounds_error=False) #Create interp obj for 1D variance
+			#interp_variance_1d= interp1d(ungridded_velocities, ungridded_variance_1d, kind='linear', bounds_error=False) #Create interp obj for 1D variance
 			if read_variance: #If user specifies read in the 2D variance map
 				interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			#ungridded_flux_1d = interp_flux_1d(ungridded_velocities) #PV diagram ungridded on origional pixels
@@ -430,8 +440,10 @@ class position_velocity:
 			if read_variance: #If user specifies read in 2D variance
 				gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
-				gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
-				gridded_variance_1d = interp_variance_1d(interp_velocity) #PV diagram variance velocity gridded
+				#gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
+				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d)
+				#gridded_variance_1d = interp_variance_1d(interp_velocity) #PV diagram variance velocity gridded
+				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d)
 			else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
 				gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
 				if read_variance: #If user specifies read in 2D variance
@@ -457,26 +469,10 @@ class position_velocity:
 			gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
 			if read_variance: #If user specifies read in 2D variance
 				gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
-			#******************************************************************
-			#******************************************************************
-			#NEED TO UPDATE LINES BELOW THIS TO HANDLE VARIANCE / UNCERTAINITY
-			#******************************************************************
-			#******************************************************************
-			flux.append(gridded_flux_1d *  scale_flux_1d) #Append 1D flux array with line
-			var1d.append(gridded_variance_1d * scale_variance_1d) #Append 1D variacne array with line
-			if 'pv' not in locals(): #First line start datacube for 2D spectrum
-				pv = gridded_flux_2d.transpose() * scale_flux_2d #Start datacube for 2D PV spectra
-				if read_variance: #If user specifies read in 2D variance
-					var2d = gridded_variance_2d.transpose() * scale_variance_2d #Start datacube for 2D PV variance
-			else: #For all other lines, add 2D PV spectra to the existing datacube
-				pv = dstack([pv, gridded_flux_2d.transpose() * scale_flux_2d]) #Stack PV spectrum of lines into a datacube
-				if read_variance: #If user specifies read in 2D variance
-					 var2d = dstack([var2d, gridded_variance_2d.transpose() * scale_variance_2d]) #Stack PV variance of lines into a datacube
-		pv = swapaxes(pv, 0, 2) #Flip axes around in cube so that it can later be saved as a fits file
-		if read_variance: #If user specifies read in 2D variance
-			var2d = swapaxes(var2d, 0, 2) #Flip axes around in cube so that it can later be saved as a fits file
-		else:
-			var2d = zeros(shape(self.pv)) #Create dummy variance map 
+			flux[i,:] = gridded_flux_1d *  scale_flux_1d #Append 1D flux array with line
+			var1d[i,:] = gridded_variance_1d * scale_flux_1d #Append 1D variacne array with line
+			pv[i,:,:] = gridded_flux_2d * scale_flux_2d #Stack PV spectrum of lines into a datacube
+			var2d[i,:,:] = gridded_variance_2d * scale_variance_2d  #Stack PV variance of lines into a datacube
 		self.flux = flux #Save 1D PV fluxes
 		self.var1d = var1d #Save 1D PV variances
 		self.pv = pv #Save datacube of stack of 2D PV diagrams for each line
@@ -709,7 +705,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
 				if s2n_mask > 0.0: #If user specifies a s2n mask
 					shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
-					#stop()
+					stop()
 					use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
 				else:
 					use_mask = on_mask
@@ -814,7 +810,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 
 def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
 	combined_region = copy.deepcopy(region_A) #Start by created the combined region
-	combined_region.flux = combined_region.flux + region_B.flux #Add fluxes together
+	combined_region.flux += region_B.flux #Add fluxes together
 	combined_region.sigma = sqrt(combined_region.sigma**2 + region_B.sigma**2) #Add uncertianity in quadrature
 	combined_region.s2n = combined_region.flux / combined_region.sigma #Recalculate new S/N
 	combined_region.path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
@@ -949,7 +945,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 					weights = oh1d.orders[j].flux
 					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i])
 					#print 'order ', j ,' gives chisq = ', chi_sq
-					store_chi_sq[i] = store_chi_sq[i] + nansum((diff*weights)**2)
+					store_chi_sq[i] += nansum((diff*weights)**2)
 			oh_scale = scales[store_chi_sq == min(abs(store_chi_sq))][0]
 			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
 			print 'OH residual scaling found to be: ', oh_scale
@@ -971,9 +967,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 				ylabel('Relative Flux')
 				pdf.savefig()
 		for i in xrange(sci1d_obj.n_orders):
-			sci1d_obj.orders[i].flux = sci1d_obj.orders[i].flux - oh1d.orders[i].flux * oh_scale
+			sci1d_obj.orders[i].flux -= oh1d.orders[i].flux * oh_scale
 			if twodim: #If user specifies a two dimensional object
-				sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
+				#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
+				sci2d_obj.orders[i].flux -= nanmedian(oh2d.orders[i].flux, 0) * oh_scale
 
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
@@ -1108,15 +1105,34 @@ class spec1d:
 			legend() #Show the legend in the plot
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
-		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
-			[low_wave_limit, high_wave_limit]  = [nanmin(combospec.wave), nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
-			wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
-			goodpix_combospec = combospec.wave >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
-			goodpix_next_order = self.orders[i+1].wave < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
-			combospec.wave = concatenate([self.orders[i+1].wave[goodpix_next_order], combospec.wave[goodpix_combospec] ]) #Stitch wavelength arrays together
-			combospec.flux = concatenate([self.orders[i+1].flux[goodpix_next_order], combospec.flux[goodpix_combospec] ]) #Stitch flux arrays together
-			combospec.noise = concatenate([self.orders[i+1].noise[goodpix_next_order], combospec.noise[goodpix_combospec] ])  #Stitch noise arrays together
-			combospec.s2n = concatenate([self.orders[i+1].s2n[goodpix_next_order], combospec.s2n[goodpix_combospec] ]) #Stitch S/N arrays together
+		order_length =  len(combospec.flux)
+		blank = zeros([order_length*self.n_orders])#Create blanks to store new giant spectrum
+		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
+		combospec.wave = copy.deepcopy(blank)
+ 		combospec.noise = copy.deepcopy(blank)
+ 		combospec.s2n = copy.deepcopy(blank)
+		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
+			if i == self.n_orders-1: #If first order, simply throw it in
+				xl = 0
+				xr = order_length
+				goodpix_next_order =  self.orders[i].wave > 0.
+			else: #Else find the wave pivots
+				[low_wave_limit, high_wave_limit]  = [nanmin(self.orders[i].wave), combospec.wave[xr-1]] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
+				wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
+				goodpix_next_order = self.orders[i].wave > wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
+				if combospec.wave[xr-1] > wave_cut:
+					xl = where(combospec.wave > wave_cut)[0][0]-1 #Set left pixel to previous right pixel
+				else:
+					xl = xr-1
+				xr = xl + len(self.orders[i].wave[goodpix_next_order])
+			combospec.wave[xl:xr] = self.orders[i].wave[goodpix_next_order] #Stitch wavelength arrays together
+			combospec.flux[xl:xr] = self.orders[i].flux[goodpix_next_order]  #Stitch flux arrays together
+			combospec.noise[xl:xr] = self.orders[i].noise[goodpix_next_order] #Stitch noise arrays together
+			combospec.s2n[xl:xr] = self.orders[i].s2n[goodpix_next_order]  #Stitch S/N arrays together
+		combospec.wave = combospec.wave[0:xr] #Get rid of extra pixels at end of arrays
+		combospec.flux = combospec.flux[0:xr]
+		combospec.noise = combospec.noise[0:xr]
+		combospec.s2n = combospec.s2n[0:xr]
 		self.combospec = combospec #save the orders all stitched together
 	#Simple function for plotting a 1D spectrum orders
 	def plot(self):
@@ -1372,17 +1388,37 @@ class spec2d:
 			self.orders[i].flux = self.orders[i].flux - tile(median_along_slit, [self.slit_pixel_length,1]) #Subtract the median
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
-		for i in xrange(self.n_orders-1): #Loop through each order to stitch one and the following one together
-			[low_wave_limit, high_wave_limit]  = [nanmin(combospec.wave), nanmax(self.orders[i+1].wave)] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
-			wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
-			goodpix_combospec = combospec.wave[0,:] >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
-			goodpix_next_order = self.orders[i+1].wave[0,:] < wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
-			combospec.wave = concatenate([self.orders[i+1].wave[:, goodpix_next_order], combospec.wave[:, goodpix_combospec] ], axis=1) #Stitch wavelength arrays together
-			combospec.flux = concatenate([self.orders[i+1].flux[:, goodpix_next_order], combospec.flux[:, goodpix_combospec] ], axis=1)#Stitch flux arrays together
-			combospec.noise = concatenate([self.orders[i+1].noise[:, goodpix_next_order], combospec.noise[:, goodpix_combospec] ], axis=1) #Stitch noise arrays together
-			combospec.s2n = concatenate([self.orders[i+1].s2n[:, goodpix_next_order], combospec.s2n[:, goodpix_combospec] ], axis=1) #Stitch s2n arrays together
+		[order_height, order_length] =  shape(combospec.flux)
+		blank = zeros([order_height, order_length*self.n_orders])#Create blanks to store new giant spectrum
+		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
+		combospec.wave = copy.deepcopy(blank)
+ 		combospec.noise = copy.deepcopy(blank)
+ 		combospec.s2n = copy.deepcopy(blank)
+		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
+			if i == self.n_orders-1: #If first order, simply throw it in
+				xl = 0
+				xr = order_length
+				goodpix_next_order =  self.orders[i].wave[0,:] > 0.
+			else: #Else find the wave pivots
+				[low_wave_limit, high_wave_limit]  = [nanmin(self.orders[i].wave[0,:]), combospec.wave[0,xr-1]] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
+				wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
+				#goodpix_combospec = combospec.wave >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
+				goodpix_next_order = self.orders[i].wave[0,:] > wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
+				#nx = len(self.orders[i].wave[:goodpix_next_order]) #Count number of pixels to add to the blanks
+				if combospec.wave[0,xr-1] > wave_cut:
+					xl = where(combospec.wave[0,:] > wave_cut)[0][0]-1 #Set left pixel to previous right pixel
+				else:
+					xl = xr-1
+				xr = xl + len(self.orders[i].wave[0, goodpix_next_order])
+			combospec.wave[:, xl:xr] = self.orders[i].wave[:, goodpix_next_order] #Stitch wavelength arrays together
+			combospec.flux[:, xl:xr] = self.orders[i].flux[:, goodpix_next_order]  #Stitch flux arrays together
+			combospec.noise[:, xl:xr] = self.orders[i].noise[:, goodpix_next_order] #Stitch noise arrays together
+			combospec.s2n[:, xl:xr] = self.orders[i].s2n[:, goodpix_next_order]  #Stitch S/N arrays together
+		combospec.wave = combospec.wave[:,0:xr] #Get rid of extra pixels at end of arrays
+		combospec.flux = combospec.flux[:,0:xr]
+		combospec.noise = combospec.noise[:,0:xr]
+		combospec.s2n = combospec.s2n[:,0:xr]
 		self.combospec = combospec #save the orders all stitched together
-	#Simple function for displaying the combined 2D spectrum
 	def plot(self, spec_lines, pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
@@ -1417,7 +1453,7 @@ class spec2d:
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
 		min_wave  = nanmin(wave_pixels, axis=0) #Minimum wavelength
 		max_wave = nanmax(wave_pixels, axis=0) #maximum wavelength
-		wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
+		#wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
 		x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
 		top_y = str(self.slit_pixel_length)
 		bottom_y = '0'
