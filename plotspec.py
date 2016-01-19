@@ -106,46 +106,17 @@ def mask_hydrogen_lines(wave, flux):
 	else:
 		return flux #If nothing is masked, return the flux unmodified
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False):
+def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True):
 	# #Read in Vega Data
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
-	vega_wave = vega_wave / 1e3 #convert angstroms to microns
-	#interp_vega_flux = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
-	#Set up vega continuum
-	#HI_lines = lines('HI.dat', delta_v=delta_v) #Load H I line list, pass delta v if specified by user
-	#
+	vega_wave /= 1e3 #convert angstroms to microns
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega
 	y = [2493670., 1950210., 1584670., 1512410., 1406170. , 1293900., 854857., 706839., 589023., 494054., 417965., 356822., 306391.]
 	interpolate_vega_continuum = interp1d(x, y, kind='cubic', bounds_error=False)
 	intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale * (vega_flux / interpolate_vega_continuum(vega_wave)-1.0),  bounds_error=False)
-	# #Scale and smooth Vega HI Lines to try to match 
-	# for i in xrange(len(HI_lines.lab_wave)): #Loop through each H I line and paint each line onto a synthetic A0V spectrum based on scaling and convolving the model vega spectrum
-	# 	lab_w = HI_lines.lab_wave[i] #Store current wavelength of current H I line
-	# 	if lab_w > 1.52: #Run only lines > 1.5 um to avoid scaling around lines that are super weak.
-	# 		if i == 1: #If using the first line make the blue side -2000 km/s and redside half way to next line
-	# 			rw = HI_lines.lab_wave[i+1] #Find wavelength of redward adjacent line
-	# 			rs = c*( (0.5*(lab_w + rw) / lab_w) -1.0) #Find velocity between current and redward ajacent line
-	# 			velocity_range = [-3000.0, rs] #Store velocity range for this line
-	# 		elif i == len(HI_lines.lab_wave)-1: #If using the last line make the blue side half way to previous line and +2000 km/s on red side
-	# 			bw = HI_lines.lab_wave[i-1]  #Find wavelength of blueward adjacent line
-	# 			bs = c*( (0.5*(lab_w + bw) / lab_w) -1.0)  #Find velocity between current and blueward ajacent line
-	# 			velocity_range = [bs ,3000.0]  #Store velocity range for this line
-	# 		else:  #Normally make velocity range half way to adjascent lines
-	# 			rw = HI_lines.lab_wave[i+1] #Find wavelength of redward adjacent line
-	# 			rs = c*( (0.5*(lab_w + rw) / lab_w) -1.0)  #Find velocity between current and redward ajacent line
-	# 			bw = HI_lines.lab_wave[i-1] #Find wavelength of blueward adjacent line
-	# 			bs = c*( (0.5*(lab_w + bw) / lab_w) -1.0)  #Find velocity between current and blueward ajacent line
-	# 			velocity_range = [bs, rs]  #Store velocity range for this line
-	# 		velocity = c*((waves/HI_lines.wave[i])-1.0) #Set wavelength array to be central velocities 
-	# 		interpolated_line_profile = interp1d(velocity, 1.0+y_scale*(vega_norm-1.0), bounds_error=False)  #Save line profile
-	# 		goodpix = (velocity >= velocity_range[0]) & (velocity <= velocity_range[1]) #Find pixels inside of velocity range
-	# 		HI_line_profiles[goodpix] = HI_line_profiles[goodpix] + interpolated_line_profile(velocity[goodpix]) -1.0#Add line profile to synthetic spectrum, apply gaussian smoothing in velocity space
-	# 		#stop()
-	#a0v_synth_spec = interp1d(waves, interpolate_vega_continuum(waves) * HI_line_profiles, bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
-	#a0v_synth_cont = interp1d(waves, HI_line_profiles, bounds_error=False)
 	interpolated_vega_continuum = interpolate_vega_continuum(waves) #grab interpolated continuum once so dn't have to interpolate it again
 	interpolated_vega_lines =  intepolate_vega_lines(waves)
 	a0v_synth_cont =  interp1d(waves, redden(B, V, H, K, waves, interpolated_vega_continuum), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
@@ -154,244 +125,66 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, convolve(interpolated_vega_lines*interpolated_vega_continuum, g)), kind='linear', bounds_error=False)
 	else: 
 		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, interpolated_vega_lines*interpolated_vega_continuum), kind='linear', bounds_error=False)
-
 	#Onto calibrations...
 	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
 	if num_dimensions == 2: #If number of dimensions is 2D
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
-	with PdfPages(save.path + 'check_flux_calib.pdf') as pdf:
-		clf() #Plot Br-gamma 
-		#br_gamma_order = 12
-		#orderS_around_br_gamma = [11, 12, 13] #Orders around Br-Gamma
-		br_gamma_order =  std.orders[11].flux
-		average_around_br_gamma = (std.orders[10].flux +  std.orders[12].flux) / 2.0
-		plot(br_gamma_order, color='red')
-		plot(br_gamma_order * (a0v_synth_cont(std.orders[11].wave)/a0v_synth_spec(std.orders[11].wave)), color='black')
-		plot(average_around_br_gamma, '--', color='blue')
-		pdf.savefig()
-		clf() #Plot Vega model spectrum
-		plot(vega_wave, vega_flux, '--', color='blue')
-		#plot(vega_wave, vega_cont, '--', color='green')
-		premake_a0v_synth_cont = a0v_synth_cont(waves)
-		plot(waves, premake_a0v_synth_cont, color='gray')
-		plot(waves,premake_a0v_synth_cont, color='black')
-		xlim([min(waves), max(waves)])
-		ylim([0., max(premake_a0v_synth_cont)])
-		pdf.savefig()
+	if savechecks: #If user specifies saving pdf check files 
+		with PdfPages(save.path + 'check_flux_calib.pdf') as pdf:
+			clf() #Plot Br-gamma 
+			br_gamma_order =  std.orders[11].flux
+			average_around_br_gamma = (std.orders[10].flux +  std.orders[12].flux) / 2.0
+			plot(br_gamma_order, color='red')
+			plot(br_gamma_order * (a0v_synth_cont(std.orders[11].wave)/a0v_synth_spec(std.orders[11].wave)), color='black')
+			plot(average_around_br_gamma, '--', color='blue')
+			pdf.savefig()
+			clf() #Plot Vega model spectrum
+			plot(vega_wave, vega_flux, '--', color='blue')
+			premake_a0v_synth_cont = a0v_synth_cont(waves)
+			plot(waves, premake_a0v_synth_cont, color='gray')
+			plot(waves,premake_a0v_synth_cont, color='black')
+			xlim([min(waves), max(waves)])
+			ylim([0., max(premake_a0v_synth_cont)])
+			pdf.savefig()
+			for i in xrange(std.n_orders): #Loop through each order
+				if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
+					std.orders[i].flux[std_flattened.orders[i].flux <= .05] = nan
+				waves = std.orders[i].wave #Std wavelengths
+				std_flux = std.orders[i].flux #Std flux
+				interpolated_a0v_synth_spec = a0v_synth_spec(waves)
+				relative_flux_calibration = (std_flux / interpolated_a0v_synth_spec)
+				clf()
+				plot(waves, std_flux, color='red')
+				plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')
+				plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
+				if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
+					std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
+					if read_variance:
+						std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+				if not no_flux: #As long as user does not specify doing a flux calibration
+					sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
+				if read_variance or num_dimensions == 1:
+					sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+					sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+				pdf.savefig()
+	else: #If user does not specifiy savecheck then just run code without saving pdfs
 		for i in xrange(std.n_orders): #Loop through each order
 			if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-				goodpix = std_flattened.orders[i].flux > .05
-				badpix = ~goodpix
-				std.orders[i].flux[badpix] = nan
-			#std_continuum =  mask_hydrogen_lines(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux) #Get back continuum of standard star by dividing it by it's own telluric correction, and interpolate resulting continuum over any H I lines
+				std.orders[i].flux[std_flattened.orders[i].flux <= .05] = nan
 			waves = std.orders[i].wave #Std wavelengths
 			std_flux = std.orders[i].flux #Std flux
-			#a0v_continuum = std.orders[i].flux / std_flattened.orders[i].flux #Get A0V continuum by dividing it by its own telluric correction
-			#vega_continuum = interpolate_vega_continuum(waves) #Get vega continuum
-			#reddened_vega_continuum = redden(H, K, waves, vega_continuum) #Articially redden Vega spectrum to A0V being used
-			#relative_flux_calibration = reddened_vega_continuum / a0v_continuum
-			#reddened_a0v_synth_spec = redden(H, K, waves, a0v_synth_spec(waves)) #Articially redden synthetic A0V spectrum to A0V being used
-			#relative_flux_calibration = std.orders[i].flux / reddened_a0v_synth_spec #Calculate relative flux calibraiton & telluric correction
 			interpolated_a0v_synth_spec = a0v_synth_spec(waves)
 			relative_flux_calibration = (std_flux / interpolated_a0v_synth_spec)
-			clf()
-			plot(waves, std_flux, color='red')
-			plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')
-			plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
 			if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
 				std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
 				if read_variance:
 					std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
 			if not no_flux: #As long as user does not specify doing a flux calibration
-				sci.orders[i].flux =  sci.orders[i].flux / relative_flux_calibration   #Apply telluric correction and flux calibration
-				#sci.orders[i].flux = sci.orders[i].flux * relative_flux_calibration/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
-			#else:  #Else if user does not want to do a flux calibration, just do a telluric correction
-			#	sci.orders[i].flux = sci.orders[i].flux / (std_flattened.orders[i].flux)
+				sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
 			if read_variance or num_dimensions == 1:
 				sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
 				sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
-			#stop()
-			pdf.savefig()
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
-
-
-####OLD VERSION OF TELLUIRC CORRECTION AND FLUX CALIBRATION, DO NOT USE!!!!!!!!
-# #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-# def telluric_and_flux_calib(sci, std, std_flattened, quality_cut = False, show_plots=True, tweak_test = False, no_flux = False):
-# 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
-# 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
-# 	vega_wave = vega_wave / 1e3 #convert angstroms to microns
-# 	interp_vega_obj = interp1d(vega_wave, vega_flux, kind='linear') #set up interopolation object for calibrated vega spectrum
-# 	interp_cont_obj = interp1d(vega_wave, vega_cont, kind='linear') #ditto for the vega continuum
-# 	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
-# 	if num_dimensions == 2:
-# 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
-# 	#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 	#~~~~~~~~~TEST FOR TWEAKING TELLURIC CORRECTION, RUNS A BUNCH OF VARIATIONS IN SCALING AND DELTA-V AND PLOTS THE RESULTS
-# 	#~~~~~~~~~~~IT DOESN'T LOOK LIKE THIS TWEAKING HELPS VERY MUCH,
-# 	if tweak_test:
-# 		clf()
-# 		#while raw_input('Tweak telluric correction? (y/n) ') == 'y':
-# 		#velocity_shift = 0.0
-# 		#a = axes()
-# 		#a.set_autoscale_on(False) 
-# 		for i in xrange(sci.n_orders):
-# 				if i == 0:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux, label = 'No Telluric Correction', color='black')
-# 				else:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux, color='black')
-# 		n=21
-# 		colors=iter(cm.rainbow(np.linspace(0,1,n)))
-# 		for scale in arange(0.8, 1.2, 0.02):
-# 			print 'Current scale is = ', scale
-# 			delta_v = 0.0
-# 			color = next(colors)
-# 			for i in xrange(sci.n_orders):
-# 				shifted_waves = std_flattened.orders[i].wave / ((delta_v/c) + 1.0)
-# 				goodpix = isfinite(std_flattened.orders[i].flux)
-# 				fit = UnivariateSpline(shifted_waves[goodpix], std_flattened.orders[i].flux[goodpix], k=4, s=0.0) #Fit an interpolated spline
-# 				tweaked_telluric_correction = fit(std_flattened.orders[i].wave)**scale
-# 				if i == 0:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, label = scale, color=color)
-# 				else:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, color=color)
-# 		legend()
-# 		suptitle('Scaling telluric correction by a power')
-# 		stop()
-# 		# clf()
-# 		# scale = 1.0
-# 		# for i in xrange(sci.n_orders):
-# 		# 		if i == 0:
-# 		# 			plot(sci.orders[i].wave, sci.orders[i].flux, label = 'No Telluric Correction', color='black')
-# 		# 		else:
-# 		# 			plot(sci.orders[i].wave, sci.orders[i].flux, color='black')
-# 		# n=21
-# 		# colors=iter(cm.rainbow(np.linspace(0,1,n)))
-# 		# for smooth in arange(0.0, 5.0, 0.25):
-# 		# 	#g  = Gaussian1DKernel(smooth)
-# 		# 	print 'Current smoothing s is = ', smooth
-# 		# 	delta_v = 0.0
-# 		# 	color = next(colors)
-# 		# 	for i in xrange(sci.n_orders):
-# 		# 		shifted_waves = std_flattened.orders[i].wave / ((delta_v/c) + 1.0)
-# 		# 		goodpix = isfinite(std_flattened.orders[i].flux)
-# 		# 		fit = UnivariateSpline(shifted_waves[goodpix], std_flattened.orders[i].flux[goodpix], k=3, s=smooth) #Fit an interpolated spline
-# 		# 		tweaked_telluric_correction = fit(std_flattened.orders[i].wave)**scale
-# 		# 		#tweaked_telluric_correction = convolve(std_flattened.orders[i].flux, g, boundary='extend')
-# 		# 		if i == 0:
-# 		# 			plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, label = smooth, color=color)
-# 		# 		else:
-# 		# 			plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, color=color)
-# 		# legend()
-# 		# suptitle('Smoothing AOV spectrum')
-# 		# stop()
-# 		clf()
-# 		#while raw_input('Tweak telluric correction? (y/n) ') == 'y':
-# 		#velocity_shift = 0.0
-# 		#a = axes()
-# 		#a.set_autoscale_on(False) 
-# 		for i in xrange(sci.n_orders):
-# 				if i == 0:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux, label = 'No Telluric Correction', color='black')
-# 				else:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux, color='black')
-# 		scale = 1.0
-# 		n=10
-# 		colors=iter(cm.rainbow(np.linspace(0,1,n)))
-# 		for delta_v in arange(-2.0, 2.5, 0.5):
-# 			print 'Current velocity is = ', delta_v
-# 			#delta_v = 0.0
-# 			color = next(colors)
-# 			for i in xrange(sci.n_orders):
-# 				shifted_waves = std_flattened.orders[i].wave / ((delta_v/c) + 1.0)
-# 				goodpix = isfinite(std_flattened.orders[i].flux)
-# 				fit = UnivariateSpline(shifted_waves[goodpix], std_flattened.orders[i].flux[goodpix], k=4, s=0.0) #Fit an interpolated spline
-# 				tweaked_telluric_correction = fit(std_flattened.orders[i].wave)**scale
-# 				if i == 0:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, label = delta_v, color=color)
-# 				else:
-# 					plot(sci.orders[i].wave, sci.orders[i].flux / tweaked_telluric_correction, color=color)
-# 		legend()
-# 		suptitle('Velocity shifting')
-# 		stop()
-# 	#~~~~~~~~~~~~~~~DONE WITH TELLURIC CORRECTOIN TWEAK TEST~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 	#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 	clf()
-# 	for i in xrange(std.n_orders): #Loop through each order
-# 		if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-# 			goodpix = std_flattened.orders[i].flux > .05
-# 			badpix = ~goodpix
-# 			std.orders[i].flux[badpix] = nan
-# 		#std_continuum =  mask_hydrogen_lines(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux) #Get back continuum of standard star by dividing it by it's own telluric correction, and interpolate resulting continuum over any H I lines
-# 		std_continuum =  std.orders[i].flux / std_flattened.orders[i].flux #Get back continuum of standard star by dividing it by it's own telluric correction,
-# 		flux_calib = interp_cont_obj(std.orders[i].wave) / std_continuum  #Try a very simple normalization #Try a very simple normalization
-# 		if show_plots:
-# 			#plot(std.orders[i].wave, flux_calib*std_continuum)
-# 			plot(std.orders[i].wave, std_continuum, color='red') #Plot relative flux calibration with H I lines masked on the A0V star
-# 			plot(std.orders[i].wave,  std.orders[i].flux / std_flattened.orders[i].flux, color='blue') #Plot relative flux calibration without H I lines masked on the A0V star
-# 		if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-# 			std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-# 			if read_variance:
-# 				std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
-# 		if not no_flux: #As long as user does not specify doing a flux calibration
-# 			sci.orders[i].flux = sci.orders[i].flux * flux_calib/ (std_flattened.orders[i].flux)  #Apply telluric correction and flux calibration
-# 		else:  #Else if user does not want to do a flux calibration, just do a telluric correction
-# 			sci.orders[i].flux = sci.orders[i].flux / (std_flattened.orders[i].flux)
-# 		if read_variance or num_dimensions == 1:
-# 			sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-# 			sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
-# 	if show_plots: #Plot Vega spectrum as well for comparison if user wants to see the flux calibration
-# 		#plot(vega_wave, vega_flux)
-# 		show()
-# 		stop()
-# 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
-
-
-
-##Attempt to corrrect OH residuals by taking the difference between two sky frames and adding it to the science frame
-#def OH_correction(sci, sky):
-	#for i in xrange(sci.n_orders): #Loop through each order
-		#sci.orders[i].flux = sci.orders[i].flux - sky.orders[i].flux #Apply correction
-	#sci.combine_orders()  #Combine now continuum subracted orders into one long slit spectrum
-	#return sci
-# def OH_correction(sky):
-# 	OH_lines = lines(OH_line_list) #Create OH line list object
-# 	clf()
-# 	for order in sky.orders:
-# 	#for i in xrange(sky.n_orders): #Loop through each order of sky spectrum
-# 		#found_OH_lines = OH_lines.parse(min(order.wave), max(order.wave)) #Search for possible OH lines in this order
-# 		#interpolate_order = interp1d(order.wave, order.flux) #Create interpolation object for OH lines
-# 		#line_peaks_guess = interpolate_order(found_OH_lines.wave) #Guess flux of line peaks for fitting amplitude of 1D gaussians
-# 		#good_lines = isfinite(line_peaks_guess)
-# 		#n_found_lines = len(line_peaks_guess[good_lines])
-# 		#all_fits = zeros(len(order.wave)) #Set up blank array to put the fits onto
-# 		#for j in xrange(n_found_lines):
-# 			#g_init =  models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5)
-# 			##fit_g = fitting.LevMarLSQFitter()
-# 			##fit_g = fitting.SimplexLSQFitter()
-# 			#fit_g = fitting.SLSQPLSQFitter()
-# 			#g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
-# 			#all_fits = all_fits + g(order.wave)
-# 		##stop()
-# 		##g_init = models.Gaussian1D(amplitude=line_peaks_guess[good_lines][0], mean=found_OH_lines.wave[good_lines][0], stddev=2e-5) #Set up first model
-# 		##if n_found_lines > 1: #If more than one model is needed
-# 		##	for j in range(1, n_found_lines): #Loop through each model
-# 		##		g_init = g_init + models.Gaussian1D(amplitude=line_peaks_guess[good_lines][j], mean=found_OH_lines.wave[good_lines][j], stddev=2e-5) #add another model to the now compound model
-# 		###fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
-# 		###fit_g = fitting.SLSQPLSQFitter()
-# 		##fit_g = fitting.SimplexLSQFitter()
-# 		##g = fit_g(g_init, order.wave, order.flux) #Fit set of gaussians to OH lines found
-# 		goodpix = isfinite(order.flux)
-# 		smooth_fit = UnivariateSpline(order.wave[goodpix], order.flux[goodpix], s=1000, k=3)
-# 		smoothed_flux = smooth_fit(order.wave)
-# 		plot(order.wave, order.flux, color='Black') #Test plotting the sky data
-# 		plot(order.wave, smoothed_flux, color='Red') 
-# 		plot(order.wave, order.flux - smoothed_flux, color='Blue')
-# 	stop()
-		
-# 		#for j in xrange(len(found_OH_lines.label)): #Loop through each found OH line
-			
-
 
 
 #Class creates, stores, and displays lines as position velocity diagrams, one of the main tools for analysis
@@ -633,7 +426,7 @@ class position_velocity:
 	def ratio(self, numerator, denominator):  #Returns PV diagram of a line ratio
 		return self.getline(numerator) / self.getline(denominator)
 	def normalize(self, line): #Normalize all PV diagrams by a single line
-		self.pv = self.pv / self.getline(line)
+		self.pv /= self.getline(line)
 	def basic_flux(self, x_range, y_range):
 		sum_along_x = nansum(self.pv[:, y_range[0]:y_range[1], x_range[0]:x_range[1]], axis=2) #Collapse along velocity space
 		total_sum = nansum(sum_along_x, axis=1) #Collapse along slit space
@@ -643,7 +436,8 @@ class position_velocity:
 
 
 class region: #Class for reading in a DS9 region file, and applying it to a position_velocity object
-	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True, s2n_mask = 0.0, line='', pixel_range=[-10,10]):
+	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True, s2n_mask = 0.0, line='', pixel_range=[-10,10],
+			savepdf=True):
 		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		use_background_region = False
 		line_labels =  pv.label #Read out line labels
@@ -675,10 +469,13 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		else: #If user specifies to mask with a specific spectral line's S/N
 			line_for_masking = line_labels == line #Find index of line to weight by
 			s2n = pv_data[line_for_masking,:,:][0] / sqrt(pv_variance[line_for_masking,:,:][0])
-			on_mask = s2n > s2n_mask #Set on mask to be where line is above some s2n threshold
-			off_mask = ~on_mask
-			mask_contours = zeros(shape(s2n)) #Set up 2D array of 1s and 0s that store the mask, 0 = outside mask, 1 = inside mask
-			mask_contours[on_mask] = 1.0
+			if any(isfinite(s2n)):
+				on_mask = s2n > s2n_mask #Set on mask to be where line is above some s2n threshold
+				if sum(on_mask)>1:
+					off_mask = ~on_mask
+					#stop()
+					mask_contours = zeros(shape(s2n)) #Set up 2D array of 1s and 0s that store the mask, 0 = outside mask, 1 = inside mask
+					mask_contours[on_mask] = 1.0
 		if use_background_region: #If you want to use another region to designate the background, read it in here
 			off_region = pyregion.open(background) #Read in background region file
 			off_mask = off_region.get_mask(shape = pv_shape) #Set up mask
@@ -691,59 +488,78 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		#	
 		#else: #If user specifies no weighting shoiuld be used
 		#	weights = ones(shape(pv_variance[0,:,:])) #Give everything inside the region equal weight
-		with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
-			line_flux = zeros(n_lines) #Set up array to store line fluxes
-			line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
-			line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
-			for i in xrange(n_lines): #Loop through each line
-				#subplot(n_subfigs, n_subfigs, i+1)
-				clf() #Clear plot field
-				ax = subplot(211) #Turn on "ax", set first subplot
-				frame = gca() #Turn off axis number labels
-				frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
-				frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
-				#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
-				if s2n_mask > 0.0: #If user specifies a s2n mask
-					shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
-					stop()
-					use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
-				else:
-					use_mask = on_mask
-				on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
-				on_variance = pv_variance[i,:,:][use_mask]
-				if use_background_region: #If a backgorund region is specified
-					off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
-					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
-				else: #If no background region is specified by the user, use the whole field 
-					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
-				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				if read_variance: #If user sets variance to be read in
-					line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
-					line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
-				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
-					imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
-					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
-					#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
-					#xlabel('Velocity [km s$^{-1}$]')
-					#ylabel('Along slit')
-					ylabel('Position', fontsize=16)
-					#xlabel('Velocity [km s$^{-1}$]')
-					if show_regions and s2n_mask == 0.0: #By default show the 
-						for p in on_patch_list: #Display DS9 regions in matplotlib
-							ax.add_patch(p)
-						for t in on_text_list:
-							ax.add_artist(t)
-						if use_background_region:
-							for p in off_patch_list:
+		line_flux = zeros(n_lines) #Set up array to store line fluxes
+		line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
+		line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
+		for i in xrange(n_lines): #Loop through each line
+			if s2n_mask > 0.0 and  sum(on_mask) > 0 and sum(isfinite(pv_data[i,:,:]))/len(pv_data[i,:,:]) > 0.5: #If user specifies a s2n mask
+				shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+				#stop()
+				use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+			else:
+				use_mask = on_mask
+			on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
+			on_variance = pv_variance[i,:,:][use_mask]
+			if use_background_region: #If a backgorund region is specified
+				off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
+				background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
+			else: #If no background region is specified by the user, use the whole field 
+				background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
+			line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
+			if read_variance: #If user sets variance to be read in
+				line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
+				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
+			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
+				for i in xrange(n_lines): #Loop through each line
+					#subplot(n_subfigs, n_subfigs, i+1)
+					clf() #Clear plot field
+					ax = subplot(211) #Turn on "ax", set first subplot
+					frame = gca() #Turn off axis number labels
+					frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
+					frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
+					#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
+					#if s2n_mask > 0.0: #If user specifies a s2n mask
+					#	shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+					#	stop()
+					#	use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+					#else:
+					#	use_mask = on_mask
+					#on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
+					#on_variance = pv_variance[i,:,:][use_mask]
+					#if use_background_region: #If a backgorund region is specified
+					#	off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
+					#	background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
+					#else: #If no background region is specified by the user, use the whole field 
+					#	background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
+					#line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
+					#if read_variance: #If user sets variance to be read in
+					#	line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
+					#	line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+					if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
+						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
+						suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
+						#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
+						#xlabel('Velocity [km s$^{-1}$]')
+						#ylabel('Along slit')
+						ylabel('Position', fontsize=16)
+						#xlabel('Velocity [km s$^{-1}$]')
+						if show_regions and s2n_mask == 0.0: #By default show the 
+							for p in on_patch_list: #Display DS9 regions in matplotlib
 								ax.add_patch(p)
-							for t in off_text_list:
+							for t in on_text_list:
 								ax.add_artist(t)
-					if s2n_mask > 0.: #Plot s2n mask if user sets it
-						contour(roll(mask_contours, shift_mask_pixels, 1))
-					ax = subplot(212) #Turn on "ax", set first subplot
-					pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
-					pdf.savefig() #Add figure as a page in the pdf
-		figure(figsize=(11, 8.5), frameon=False) #Reset figure size
+							if use_background_region:
+								for p in off_patch_list:
+									ax.add_patch(p)
+								for t in off_text_list:
+									ax.add_artist(t)
+						if s2n_mask > 0.: #Plot s2n mask if user sets it
+							contour(roll(mask_contours, shift_mask_pixels, 1))
+						ax = subplot(212) #Turn on "ax", set first subplot
+						pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
+						pdf.savefig() #Add figure as a page in the pdf
+			figure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
 		self.flux = line_flux #Save line fluxes
@@ -815,15 +631,6 @@ def combine_regions(region_A, region_B, name='combined_region'): #Definition to 
 	combined_region.s2n = combined_region.flux / combined_region.sigma #Recalculate new S/N
 	combined_region.path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 	return(combined_region) #Returned combined region
-
-
-	#def process_h2(self): #Create and store fluxes for H2 for this region, used mainly for testing, user should use this code in their own scripts to combine H2 lines from H and K bands
-		#h2_transitions = h2.make_line_list() #Set up H2 transition object
-		#h2_transitions.set_flux_in_region_obj(self.label, self.flux, self.s2n, self.sigma) #Read in fluxes for this region and assign them each to the appropriate H2 line
-		#h2_transitions.calculate_column_density() #Calculate column densities
-		#h2_transitions.quick_plot()
-		#print 'Done with H2 stuffits'
-		#stop() #For testing
 
 
 class extract: #Class for extracting fluxes in 1D from a position_velocity object
@@ -898,7 +705,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
 def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
-		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False):
+		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False, savechecks=True):
 	if usestd:
 		#Make 1D spectrum object for standard star
 		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
@@ -949,23 +756,24 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 			oh_scale = scales[store_chi_sq == min(abs(store_chi_sq))][0]
 			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
 			print 'OH residual scaling found to be: ', oh_scale
-		with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
-			clf()
-			for i in xrange(sci1d_obj.n_orders): #Save whole spectrum at once
-				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
-			xlabel('$\lambda$ [$\mu$m]')
-			ylabel('Relative Flux')
-			pdf.savefig()
-			for i in xrange(sci1d_obj.n_orders): #Then save each order for closer inspection
+		if savechecks: #If user specifies to save checks as a pdf
+			with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
 				clf()
-				plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-				plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
-				plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+				for i in xrange(sci1d_obj.n_orders): #Save whole spectrum at once
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+					plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
 				xlabel('$\lambda$ [$\mu$m]')
 				ylabel('Relative Flux')
 				pdf.savefig()
+				for i in xrange(sci1d_obj.n_orders): #Then save each order for closer inspection
+					clf()
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+					plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale, color='black')
+					xlabel('$\lambda$ [$\mu$m]')
+					ylabel('Relative Flux')
+					pdf.savefig()
 		for i in xrange(sci1d_obj.n_orders):
 			sci1d_obj.orders[i].flux -= oh1d.orders[i].flux * oh_scale
 			if twodim: #If user specifies a two dimensional object
@@ -976,9 +784,9 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
-		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #For 1D spectrum
+		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth, savechecks=savechecks) #For 1D spectrum
 		if twodim: #If user specifies this object has a 2D spectrum
-			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth) #Run for 2D spectrum
+			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj, H=H, K=K, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth, savechecks=savechecks) #Run for 2D spectrum
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
@@ -1026,7 +834,11 @@ class fits_file:
 		self.var1d = var1d
 		self.var2d = var2d #Store if file is a 2D variance map (like twodim but with variance instead of signal)
 		self.path = self.filepath() #Determine path and filename for fits file
-		self.data = fits.open(self.path) #Open fits file and put data into memory
+		fits_container = fits.open(self.path) #Open fits file and put data into memory
+		self.data = fits_container[0].data.byteswap().newbyteorder() #Grab data from fits file
+		self.n_orders = len(fits_container[0].data[:,0]) #cound number of orders in fits file
+		fits_container.close() #Close fits file data
+		#self.data = fits.open(self.path) #Open fits file and put data into memory
 		#print self.path
 	def filepath(self): #Given input variables, determine the path to the target fits file
 		prefix =  'SDC' + self.band + '_' + self.date + '_' + self.frameno #Set beginning (prefix) of filename
@@ -1063,12 +875,14 @@ class spec1d:
 		specdata = fits_spec.get() #Grab fits data for flux out of object
 		vardata = fits_var.get() #Grab fits data for variance
 		orders = [] #Set up empty list for storing each orders
-		n_orders = len(specdata[0].data[:,0]) #Count number of orders in spectrum
-		wavedata = wavedata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
-		fluxdata = specdata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
-		noisedata = sqrt( vardata[0].data.byteswap().newbyteorder() ) #Read out noise from fits file into a simpler variable by taking the square root of the variance
+		n_orders = fits_spec.n_orders
+		#n_orders = len(specdata[0].data[:,0]) #Count number of orders in spectrum
+		#wavedata = wavedata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
+		#fluxdata = specdata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
+		#noisedata = sqrt( vardata[0].data.byteswap().newbyteorder() ) #Read out noise from fits file into a simpler variable by taking the square root of the variance
+		noisedata = sqrt(vardata)  #Read out noise from fits file into a simpler variable by taking the square root of the variance
 		for i in xrange(n_orders): #Loop through to process each order seperately
-			orders.append( spectrum(wavedata[i,:], fluxdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
+			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
 	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
@@ -1302,21 +1116,26 @@ class spec2d:
 		spec2d = fits_spec.get() #grab all fits data
 		if read_variance: #If reading in 2D variance data
 			var2d = fits_var.get() #Grab all variance data from fits file
-		n_orders = len(spec2d[1].data[:,0]) #Calculate number of orders to use  
+		n_orders = fits_spec.n_orders
+		#n_orders = len(spec2d[1].data[:,0]) #Calculate number of orders to use  
 		#slit_pixel_length = len(spec2d[0].data[0,:,:]) #Height of slit in pixels for this target and band
 		slit_pixel_length = slit_length  #Height of slit in pixels for this target and band
 		orders = [] #Set up empty list for storing each orders
-		wavedata = wavedata[0].data.byteswap().newbyteorder()
+		#wavedata = wavedata[0].data.byteswap().newbyteorder()
 		for i in xrange(n_orders):
 			#wave1d = spec2d[1].data[i,:].byteswap().newbyteorder() #Grab wavelength calibration for current order
 			wave1d = wavedata[i,:] #Grab wavelength calibration for current order
 			wave2d = tile(wave1d, [slit_pixel_length,1]) #Create a 2D array storing the wavelength solution, to be appended below the data
-			nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
-			data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			#nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
+			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			nx, ny, nz = shape(spec2d)
+			data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
+			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			if read_variance:
 				#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
-				noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+				#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+				noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
 				orders.append( spectrum(wave2d, data2d, noise = noise2d) )
 			else: 
 				orders.append( spectrum(wave2d, data2d) )
@@ -1385,7 +1204,7 @@ class spec2d:
 	def subtract_median_vertical(self): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			median_along_slit = nanmedian(self.orders[i].flux, axis=0) #Collapse median along slit
-			self.orders[i].flux = self.orders[i].flux - tile(median_along_slit, [self.slit_pixel_length,1]) #Subtract the median
+			self.orders[i].flux -= tile(median_along_slit, [self.slit_pixel_length,1]) #Subtract the median
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
 		[order_height, order_length] =  shape(combospec.flux)
@@ -1663,24 +1482,6 @@ def fill_nans(x, y):
 # 		ds9.close()
 	
 
-##Do a simple relative flux calibration by smoothing the standard star spectrum,
-##masking out Brackett lines, and dividing by the continuum of Vega (file from PLP)
-## OLD, but might incorporate features into future flux calibration code
-#def simple_telluric_and_flux_calibration(sci, std):
-	#num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
-	#if num_dimensions == 2:
-		#slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
-	#for i in xrange(sci.n_orders): #Loop through each order
-		#if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-			##goodpix = logical_and(sci.orders[i].flux > -100.0, std.orders[i].flux > .1)  #apply the mask
-			#goodpix = std.orders[i].flux > .05
-			#badpix = ~goodpix
-			#std.orders[i].flux[badpix] = nan
-		#if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-			#std.orders[i].flux = tile(std.orders[i].flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-		#sci.orders[i].flux = sci.orders[i].flux / std.orders[i].flux #Divide science spectrum by standard spectrum
-	#sci.orders = combine_orders(sci.orders) #Combine the newly corrected orders into one long spectrum
-	#return(sci) #Return the new telluric corrected science spectrum
 	
 	
 #Find lines across all orders and saves it as a line list object
