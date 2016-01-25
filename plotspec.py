@@ -30,7 +30,6 @@ except ImportError:
 #pipeline_path = '/Volumes/IGRINS_data/plp-interpolate/'#Define path to pipeline directory where reduced data is stored
 pipeline_path = '/Volumes/IGRINS_data/plp-2.1-alpha.2/'
 save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files
-read_variance = True #Boolean that tells code to use variance for 2D maps (or not) NOTE: This is an experimental feature and not yet implemented in the official pipeline.
 #default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
 default_wave_pivot = 0.75 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
 velocity_range =100.0 # +/- km/s for interpolated velocity grid
@@ -105,6 +104,11 @@ def mask_hydrogen_lines(wave, flux):
 		return flux_to_return #Return now masked pixels
 	else:
 		return flux #If nothing is masked, return the flux unmodified
+
+
+
+
+
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
 def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True):
 	# #Read in Vega Data
@@ -157,15 +161,16 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 				plot(waves, std_flux, color='red')
 				plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')
 				plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
-				if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-					std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-					if read_variance:
-						std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+				#if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
+				#	std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
+					#std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
 				if not no_flux: #As long as user does not specify doing a flux calibration
 					sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-				if read_variance or num_dimensions == 1:
-					sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-					sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+				#sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+				#sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+				#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+				#stop()
+				sci.orders[i].noise = sci.orders[i].flux * sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
 				pdf.savefig()
 	else: #If user does not specifiy savecheck then just run code without saving pdfs
 		for i in xrange(std.n_orders): #Loop through each order
@@ -177,19 +182,20 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 			relative_flux_calibration = (std_flux / interpolated_a0v_synth_spec)
 			if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
 				std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-				if read_variance:
-					std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+				#std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
 			if not no_flux: #As long as user does not specify doing a flux calibration
 				sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-			if read_variance or num_dimensions == 1:
-				sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-				sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+			#sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+			#sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
+			#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+			#stop()
+			sci.orders[i].noise = sci.orders[i].flux * sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
 #Class creates, stores, and displays lines as position velocity diagrams, one of the main tools for analysis
 class position_velocity:
-	def __init__(self, spec1d, spec2d, line_list, s2n=False, make_1d=False, shift_lines=''):
+	def __init__(self, spec1d, spec2d, line_list, make_1d=False, shift_lines=''):
 		#slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
 		slit_pixel_length = slit_length #Height of slit in pixels for this target and band
 		wave_pixels = spec2d.wave[0,:] #Extract 1D wavelength for each pixel
@@ -220,18 +226,15 @@ class position_velocity:
 			ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
 			ungridded_flux_2d = spec2d.flux[:,pixel_cut] #PV diagram ungridded on origional pixels			
 			ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
-			if read_variance: #If user specifies read in the 2D variance map
-				ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
+			ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
 			#interp_flux_1d= interp1d(ungridded_velocities, ungridded_flux_1d, kind='linear', bounds_error=False) #Create interp. object for 1D flux
 			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
 			#interp_variance_1d= interp1d(ungridded_velocities, ungridded_variance_1d, kind='linear', bounds_error=False) #Create interp obj for 1D variance
-			if read_variance: #If user specifies read in the 2D variance map
-				interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
+			interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			#ungridded_flux_1d = interp_flux_1d(ungridded_velocities) #PV diagram ungridded on origional pixels
 			#ungridded_flux_2d = interp_flux_2d(ungridded_velocities) #PV diagram ungridded on origional pixels
 			gridded_flux_2d = interp_flux_2d(interp_velocity) #PV diagram velocity gridded	
-			if read_variance: #If user specifies read in 2D variance
-				gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
+			gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
 				#gridded_flux_1d = interp_flux_1d(interp_velocity) #PV diagram velocity gridded
 				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d)
@@ -239,14 +242,12 @@ class position_velocity:
 				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d)
 			else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
 				gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
-				if read_variance: #If user specifies read in 2D variance
-					gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
+				gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
 			if nanmin(ungridded_flux_1d) != nan: #Check if everything near line is nan, if so skip over this code to avoid bug
 				scale_flux_1d = 1.0
 				scale_flux_2d = 1.0
 				scale_variance_1d = 1.0
-				if read_variance: #If user specifies read in 2D variance
-					scale_variance_2d = 1.0
+				scale_variance_2d = 1.0
 			else:
 				# if not s2n: #Check that 1D data is not an array of S/N and actually is flux
 				# 	scale_flux_1d = nansum(ungridded_result_1d) / nansum(gridded_result_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
@@ -255,13 +256,11 @@ class position_velocity:
 				scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
 				scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
 				scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-				if read_variance: #If user specifies read in 2D variance
-					scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
+				scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
 			gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
 			gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
 			gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
-			if read_variance: #If user specifies read in 2D variance
-				gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
+			gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
 			flux[i,:] = gridded_flux_1d *  scale_flux_1d #Append 1D flux array with line
 			var1d[i,:] = gridded_variance_1d * scale_flux_1d #Append 1D variacne array with line
 			pv[i,:,:] = gridded_flux_2d * scale_flux_2d #Stack PV spectrum of lines into a datacube
@@ -269,7 +268,6 @@ class position_velocity:
 		self.flux = flux #Save 1D PV fluxes
 		self.var1d = var1d #Save 1D PV variances
 		self.pv = pv #Save datacube of stack of 2D PV diagrams for each line
-		#if read_variance: #If user specifies read in 2D variance
 		self.var2d = var2d #Save 2D PV variance
 		self.velocity = interp_velocity #Save aray storing velocity grid all lines were interpolated onto
 		self.label = show_lines.label #Save line labels
@@ -277,13 +275,11 @@ class position_velocity:
 		self.wave = show_lines.wave #Save line wavelengths
 		self.n_lines = len(self.flux) #Count number of individual spectral lines lines stored in position velocity object
 		self.slit_pixel_length = slit_pixel_length #Store number of pixels along slit
-		self.s2n = s2n #Store boolean operator if spectrum is a S/N spectrum or not
+		#self.s2n = s2n #Store boolean operator if spectrum is a S/N spectrum or not
 	def view(self, line='', wave=0.0,  pause = False, close = False, printlines=False): #Function loads 2D PV diagrams in DS9 and plots 1D diagrams
 		self.save_fits() #Save a fits file of the pv diagrams for opening in DS9
 		ds9.open() #Open DS9
 		ds9.show(save.path + 'pv.fits', new = False) #Load PV diagrams into DS9
-		#if read_variance:
-			#XXXXXXXXX
 		ds9.set('zoom to fit') #Zoom PV diagram to fit ds9 window
 		ds9.set('zoom 0.9') #Zoom out a little bit to see the coordinate grid
 		ds9.set('scale log') #Set view to log scale
@@ -398,7 +394,6 @@ class position_velocity:
 		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
 		pv_file.writeto(save.path + 'pv.fits', clobber  = True) #Save fits file
-		# if read_variance: #If variance is read in, save signal to noise fits file to also be displayed with pv diagram
 		# 	s2n_file = fits.PrimaryHDU(self.s2n) #Set up fits file object
 		# 	#Add WCS for linear interpolated velocity
 		# 	s2n_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
@@ -471,7 +466,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			s2n = pv_data[line_for_masking,:,:][0] / sqrt(pv_variance[line_for_masking,:,:][0])
 			if any(isfinite(s2n)):
 				on_mask = s2n > s2n_mask #Set on mask to be where line is above some s2n threshold
-				if sum(on_mask)>1:
+				if nansum(on_mask)>1:
 					off_mask = ~on_mask
 					#stop()
 					mask_contours = zeros(shape(s2n)) #Set up 2D array of 1s and 0s that store the mask, 0 = outside mask, 1 = inside mask
@@ -492,21 +487,25 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
 		line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
 		for i in xrange(n_lines): #Loop through each line
-			if s2n_mask > 0.0 and  sum(on_mask) > 0 and sum(isfinite(pv_data[i,:,:]))/len(pv_data[i,:,:]) > 0.5: #If user specifies a s2n mask
+			if s2n_mask > 0.0: #If user specifies a s2n mask
 				shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
 				#stop()
-				use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+				if len(shift_mask_pixels) > 0: #Catch error
+					try:
+						use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+					except:
+						break
 			else:
 				use_mask = on_mask
-			on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
-			on_variance = pv_variance[i,:,:][use_mask]
-			if use_background_region: #If a backgorund region is specified
-				off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
-				background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
-			else: #If no background region is specified by the user, use the whole field 
-				background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
-			line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-			if read_variance: #If user sets variance to be read in
+			if "use_mask" in locals(): #If mask is valid run the code, otherwise ignore code to skip errors
+				on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
+				on_variance = pv_variance[i,:,:][use_mask]
+				if use_background_region: #If a backgorund region is specified
+					off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
+					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
+				else: #If no background region is specified by the user, use the whole field 
+					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
+				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
 				line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
@@ -533,9 +532,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					#else: #If no background region is specified by the user, use the whole field 
 					#	background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
 					#line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-					#if read_variance: #If user sets variance to be read in
-					#	line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
-					#	line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+					#line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
+					#line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 					if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
 						suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
@@ -670,9 +668,8 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 				else: #If no background region is specified by the user, use the whole field 
 					background_level = 0.0 #Or if you don't want to subtract the background, just make the level per pixel = 0
 				line_flux[i] = nansum(data[on_target]) - background_level * size(data[on_target]) #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				if read_variance: #If user sets variance to be read in
-					line_sigma[i] =  sqrt( nansum(variance[on_target]) ) #Store 1 sigma uncertainity for line
-					line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+				line_sigma[i] =  sqrt( nansum(variance[on_target]) ) #Store 1 sigma uncertainity for line
+				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
 					pv.plot_1d_velocity(i, clear=False, fontsize=16, show_zero=show_extraction) #Test plotting 1D spectrum below 2D spectrum
@@ -804,14 +801,11 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 
 
 #Wrapper for easily creating a 1D or 2D comprehensive spectrum object of any type, allowing user to import an entire specturm object in one line
-def makespec(date, band, waveno, frameno, std=False, twodim=False, s2n=False):
+def makespec(date, band, waveno, frameno, std=False, twodim=False):
 	#spec_data = fits_file(date, frameno, band, std=std, twodim=twodim, s2n=s2n) #Read in data from spectrum
 	spec_data = fits_file(date, frameno, band, std=std, twodim=twodim)
 	wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
-
-	if twodim and not read_variance: #If spectrum is 2D but no variance data to be read in
-		spec_obj = spec2d(wave_data, spec_data) #Create 2D spectrum object
-	elif twodim and read_variance: #If spectrum is 2D and variance data will be read in
+	if twodim: #If spectrum is 2D but no variance data to be read in
 		var_data = fits_file(date, frameno, band, var2d=True) #Grab data for 2D variance cube
 		spec_obj = spec2d(wave_data, spec_data, fits_var=var_data) #Create 2D spectrum object, with variance data inputted to get S/N
 	else: #If spectrum is 1D
@@ -924,7 +918,7 @@ class spec1d:
 		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
 		combospec.wave = copy.deepcopy(blank)
  		combospec.noise = copy.deepcopy(blank)
- 		combospec.s2n = copy.deepcopy(blank)
+ 		#combospec.s2n = copy.deepcopy(blank)
 		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
 			if i == self.n_orders-1: #If first order, simply throw it in
 				xl = 0
@@ -942,11 +936,11 @@ class spec1d:
 			combospec.wave[xl:xr] = self.orders[i].wave[goodpix_next_order] #Stitch wavelength arrays together
 			combospec.flux[xl:xr] = self.orders[i].flux[goodpix_next_order]  #Stitch flux arrays together
 			combospec.noise[xl:xr] = self.orders[i].noise[goodpix_next_order] #Stitch noise arrays together
-			combospec.s2n[xl:xr] = self.orders[i].s2n[goodpix_next_order]  #Stitch S/N arrays together
+			#combospec.s2n[xl:xr] = self.orders[i].s2n[goodpix_next_order]  #Stitch S/N arrays together
 		combospec.wave = combospec.wave[0:xr] #Get rid of extra pixels at end of arrays
 		combospec.flux = combospec.flux[0:xr]
 		combospec.noise = combospec.noise[0:xr]
-		combospec.s2n = combospec.s2n[0:xr]
+		#combospec.s2n = combospec.s2n[0:xr]
 		self.combospec = combospec #save the orders all stitched together
 	#Simple function for plotting a 1D spectrum orders
 	def plot(self):
@@ -1114,8 +1108,7 @@ class spec2d:
 	def __init__(self, fits_wave, fits_spec, fits_var=[]):
 		wavedata = fits_wave.get() #Grab fits data for wavelength out of object
 		spec2d = fits_spec.get() #grab all fits data
-		if read_variance: #If reading in 2D variance data
-			var2d = fits_var.get() #Grab all variance data from fits file
+		var2d = fits_var.get() #Grab all variance data from fits file
 		n_orders = fits_spec.n_orders
 		#n_orders = len(spec2d[1].data[:,0]) #Calculate number of orders to use  
 		#slit_pixel_length = len(spec2d[0].data[0,:,:]) #Height of slit in pixels for this target and band
@@ -1132,13 +1125,10 @@ class spec2d:
 			data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
-			if read_variance:
-				#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
-				#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
-				noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
-				orders.append( spectrum(wave2d, data2d, noise = noise2d) )
-			else: 
-				orders.append( spectrum(wave2d, data2d) )
+			#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+			#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+			noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
+			orders.append( spectrum(wave2d, data2d, noise = noise2d) )
 		self.orders = orders
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
@@ -1212,7 +1202,7 @@ class spec2d:
 		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
 		combospec.wave = copy.deepcopy(blank)
  		combospec.noise = copy.deepcopy(blank)
- 		combospec.s2n = copy.deepcopy(blank)
+ 		#combospec.s2n = copy.deepcopy(blank)
 		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
 			if i == self.n_orders-1: #If first order, simply throw it in
 				xl = 0
@@ -1232,11 +1222,11 @@ class spec2d:
 			combospec.wave[:, xl:xr] = self.orders[i].wave[:, goodpix_next_order] #Stitch wavelength arrays together
 			combospec.flux[:, xl:xr] = self.orders[i].flux[:, goodpix_next_order]  #Stitch flux arrays together
 			combospec.noise[:, xl:xr] = self.orders[i].noise[:, goodpix_next_order] #Stitch noise arrays together
-			combospec.s2n[:, xl:xr] = self.orders[i].s2n[:, goodpix_next_order]  #Stitch S/N arrays together
+			#combospec.s2n[:, xl:xr] = self.orders[i].s2n[:, goodpix_next_order]  #Stitch S/N arrays together
 		combospec.wave = combospec.wave[:,0:xr] #Get rid of extra pixels at end of arrays
 		combospec.flux = combospec.flux[:,0:xr]
 		combospec.noise = combospec.noise[:,0:xr]
-		combospec.s2n = combospec.s2n[:,0:xr]
+		#combospec.s2n = combospec.s2n[:,0:xr]
 		self.combospec = combospec #save the orders all stitched together
 	def plot(self, spec_lines, pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
@@ -1244,7 +1234,7 @@ class spec2d:
 			self.combine_orders() #If combined spectrum does not exist, combine the orders
 		wave_fits = fits.PrimaryHDU(self.combospec.wave)    #Create fits file containers
 		if s2n: #If you want to view the s2n
-			spec_fits = fits.PrimaryHDU(self.combospec.s2n)
+			spec_fits = fits.PrimaryHDU(self.combospec.s2n())
 		else: #You will view the flux
 			spec_fits = fits.PrimaryHDU(self.combospec.flux)
 		wave_fits.writeto(save.path + 'longslit_wave.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
@@ -1332,12 +1322,19 @@ class spectrum:
 		self.wave = wave #Set up wavelength array 
 		self.flux = flux #Set up flux array
 		#if "noise" in locals(): #If user specifies a noise
-		if len(noise) >= 1:
+		self.noise_stored = len(noise) >= 1 #Store boolean if noise array actually exists 
+		if self.noise_stored:
 			self.noise = noise #Save it like flux
-			self.s2n = flux / noise
+			#self.s2n = flux / noise
 		else:
 			self.noise = zeros(shape(flux))
-			self.s2n = zeros(shape(flux))
+			#self.s2n = zeros(shape(flux))
+	def s2n(self):
+		if self.noise_stored: #If noise is stored
+			return self.flux/self.noise #Return proper S/N
+		else: #But if no noise is stored
+			return zeros(shape(self.flux)) #Return an array of zeros for S/N
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for dealing with lines and line lists~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
