@@ -130,7 +130,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 	else: 
 		a0v_synth_spec =  interp1d(waves, redden(B, V, H, K, waves, interpolated_vega_lines*interpolated_vega_continuum), kind='linear', bounds_error=False)
 	#Onto calibrations...
-	num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
+	num_dimensions = ndim(sci.orders[0].flux) #Store number of dimensions
 	if num_dimensions == 2: #If number of dimensions is 2D
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
 	if savechecks: #If user specifies saving pdf check files 
@@ -161,16 +161,10 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 				plot(waves, std_flux, color='red')
 				plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')
 				plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
-				#if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-				#	std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-					#std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+				s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2)  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
 				if not no_flux: #As long as user does not specify doing a flux calibration
 					sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-				#sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-				#sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
-				#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-				#stop()
-				sci.orders[i].noise = sci.orders[i].flux * sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+				sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
 				pdf.savefig()
 	else: #If user does not specifiy savecheck then just run code without saving pdfs
 		for i in xrange(std.n_orders): #Loop through each order
@@ -180,16 +174,10 @@ def telluric_and_flux_calib(sci, std, std_flattened, H=0.0, K=0.0, B=0.0, V=0.0,
 			std_flux = std.orders[i].flux #Std flux
 			interpolated_a0v_synth_spec = a0v_synth_spec(waves)
 			relative_flux_calibration = (std_flux / interpolated_a0v_synth_spec)
-			if num_dimensions == 2:  #For 2D spectra, expand standard star spectrum from 1D to 2D
-				std.orders[i].flux = tile(std_flux, [slit_pixel_length,1]) #Expand standard star spectrum into two dimensions
-				#std.orders[i].s2n = tile(std.orders[i].s2n, [slit_pixel_length,1]) #Expand standard star spectrum S/N into two dimensions
+			s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
 			if not no_flux: #As long as user does not specify doing a flux calibration
 				sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-			#sci.orders[i].s2n = 1.0/sqrt(sci.orders[i].s2n**-2 + std.orders[i].s2n**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-			#sci.orders[i].noise = sci.orders[i].flux / sci.orders[i].s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibration
-			#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-			#stop()
-			sci.orders[i].noise = sci.orders[i].flux * sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+			sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
@@ -198,7 +186,7 @@ class position_velocity:
 	def __init__(self, spec1d, spec2d, line_list, make_1d=False, shift_lines=''):
 		#slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
 		slit_pixel_length = slit_length #Height of slit in pixels for this target and band
-		wave_pixels = spec2d.wave[0,:] #Extract 1D wavelength for each pixel
+		wave_pixels = spec2d.wave #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
 		#wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
 		#x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
@@ -221,8 +209,8 @@ class position_velocity:
 		
 		for i in xrange(n_lines): #Label the lines
 			pv_velocity = c * ( (spec2d.wave / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
-			pixel_cut = abs(pv_velocity[0]) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
-			ungridded_velocities = pv_velocity[0, pixel_cut]
+			pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
+			ungridded_velocities = pv_velocity[pixel_cut]
 			ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
 			ungridded_flux_2d = spec2d.flux[:,pixel_cut] #PV diagram ungridded on origional pixels			
 			ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
@@ -1118,7 +1106,7 @@ class spec2d:
 		for i in xrange(n_orders):
 			#wave1d = spec2d[1].data[i,:].byteswap().newbyteorder() #Grab wavelength calibration for current order
 			wave1d = wavedata[i,:] #Grab wavelength calibration for current order
-			wave2d = tile(wave1d, [slit_pixel_length,1]) #Create a 2D array storing the wavelength solution, to be appended below the data
+			#wave2d = tile(wave1d, [slit_pixel_length,1]) #Create a 2D array storing the wavelength solution, to be appended below the data
 			#nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			nx, ny, nz = shape(spec2d)
@@ -1128,7 +1116,7 @@ class spec2d:
 			#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
 			#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
 			noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
-			orders.append( spectrum(wave2d, data2d, noise = noise2d) )
+			orders.append( spectrum(wave1d, data2d, noise = noise2d) )
 		self.orders = orders
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
@@ -1200,30 +1188,31 @@ class spec2d:
 		[order_height, order_length] =  shape(combospec.flux)
 		blank = zeros([order_height, order_length*self.n_orders])#Create blanks to store new giant spectrum
 		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
-		combospec.wave = copy.deepcopy(blank)
+		combospec.wave = zeros(order_length*self.n_orders)
  		combospec.noise = copy.deepcopy(blank)
  		#combospec.s2n = copy.deepcopy(blank)
 		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
 			if i == self.n_orders-1: #If first order, simply throw it in
 				xl = 0
 				xr = order_length
-				goodpix_next_order =  self.orders[i].wave[0,:] > 0.
+				#goodpix_next_order =  self.orders[i].wave[0,:] > 0.
+				goodpix_next_order =  self.orders[i].wave > 0.
 			else: #Else find the wave pivots
-				[low_wave_limit, high_wave_limit]  = [nanmin(self.orders[i].wave[0,:]), combospec.wave[0,xr-1]] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
+				[low_wave_limit, high_wave_limit]  = [nanmin(self.orders[i].wave), combospec.wave[xr-1]] #Find the wavelength of the edges of the already stitched orders and the order currently being stitched to the rest 
 				wave_cut = low_wave_limit + wave_pivot*(high_wave_limit-low_wave_limit) #Find wavelength between stitched orders and order to stitch to be the cut where they are combined, with pivot set by global var wave_pivot
 				#goodpix_combospec = combospec.wave >= wave_cut #Find pixels in already stitched orders to the left of where the next order will be cut and stitched to
-				goodpix_next_order = self.orders[i].wave[0,:] > wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
+				goodpix_next_order = self.orders[i].wave > wave_cut #Find pixels to the right of the where the order will be cut and stitched to the rest
 				#nx = len(self.orders[i].wave[:goodpix_next_order]) #Count number of pixels to add to the blanks
-				if combospec.wave[0,xr-1] > wave_cut:
-					xl = where(combospec.wave[0,:] > wave_cut)[0][0]-1 #Set left pixel to previous right pixel
+				if combospec.wave[xr-1] > wave_cut:
+					xl = where(combospec.wave > wave_cut)[0][0]-1 #Set left pixel to previous right pixel
 				else:
 					xl = xr-1
-				xr = xl + len(self.orders[i].wave[0, goodpix_next_order])
-			combospec.wave[:, xl:xr] = self.orders[i].wave[:, goodpix_next_order] #Stitch wavelength arrays together
+				xr = xl + len(self.orders[i].wave[goodpix_next_order])
+			combospec.wave[xl:xr] = self.orders[i].wave[goodpix_next_order] #Stitch wavelength arrays together
 			combospec.flux[:, xl:xr] = self.orders[i].flux[:, goodpix_next_order]  #Stitch flux arrays together
 			combospec.noise[:, xl:xr] = self.orders[i].noise[:, goodpix_next_order] #Stitch noise arrays together
 			#combospec.s2n[:, xl:xr] = self.orders[i].s2n[:, goodpix_next_order]  #Stitch S/N arrays together
-		combospec.wave = combospec.wave[:,0:xr] #Get rid of extra pixels at end of arrays
+		combospec.wave = combospec.wave[0:xr] #Get rid of extra pixels at end of arrays
 		combospec.flux = combospec.flux[:,0:xr]
 		combospec.noise = combospec.noise[:,0:xr]
 		#combospec.s2n = combospec.s2n[:,0:xr]
@@ -1232,7 +1221,7 @@ class spec2d:
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #If combined spectrum does not exist, combine the orders
-		wave_fits = fits.PrimaryHDU(self.combospec.wave)    #Create fits file containers
+		wave_fits = fits.PrimaryHDU(tile(self.combospec.wave, [slit_length,1]))    #Create fits file containers
 		if s2n: #If you want to view the s2n
 			spec_fits = fits.PrimaryHDU(self.combospec.s2n())
 		else: #You will view the flux
@@ -1258,7 +1247,7 @@ class spec2d:
 	#Function for labeling up 2D spectrum in DS9, creates a region file storing all the labels and than reads it into, called by show()
 	def make_label2d(self, spec_lines, label_lines = True, label_wavelength = True, label_OH = True, num_wave_labels = 50):
 		regions = [] #Create list to store strings for creating a DS9 region file
-		wave_pixels = self.combospec.wave[0,:] #Extract 1D wavelength for each pixel
+		wave_pixels = self.combospec.wave #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
 		min_wave  = nanmin(wave_pixels, axis=0) #Minimum wavelength
 		max_wave = nanmax(wave_pixels, axis=0) #maximum wavelength
