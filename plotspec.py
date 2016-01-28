@@ -13,6 +13,7 @@ from scipy.interpolate import interp1d, UnivariateSpline #For interpolating
 import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
+from scipy.ndimage.filters import median_filter #For cosmic ray removal
 from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 ion() #Turn on interactive plotting for matplotlib
@@ -22,6 +23,7 @@ try:  #Try to import bottleneck library, this greatly speeds up things such as n
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
 	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
+from numba import jit #Import numba for speeding up some definitions
 
 #Global variables user should set
 #pipeline_path = '/media/kfkaplan/IGRINS_Data/plp-testing/' #Paths for running on linux laptop
@@ -37,6 +39,9 @@ velocity_res = 1.0 #Resolution of velocity grid
 #slit_length = 62 #Number of pixels along slit in both H and K bands
 slit_length = 61 #Number of pixels along slit in both H and K bands
 block = 750 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
+cosmic_horizontal_mask = 3 #Number of pixels to median smooth horizontally (in wavelength space) when searching for cosmics
+cosmic_horizontal_limit  = 2.2 #Number of times the data must be above it's own median smoothed self to find cosmic rays
+cosmic_s2n_min = 2.5 #Minimum S/N needed to flag a pixel as a cosmic ray
 
 #Global variables, should remain untouched
 data_path = pipeline_path + 'outdata/'
@@ -64,6 +69,7 @@ save = save_class() #Create object user can change the name to
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for modifying spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #Artifically redden a spectrum
+@jit
 def redden(B, V, H, K, waves, flux):
 	alpha = 2.14 #Slope of near-infrared extinction law from Stead & Hoare (2009)
 	#alpha = 1.75 #Slope from older literature
@@ -415,6 +421,21 @@ class position_velocity:
 		total_sum = nansum(sum_along_x, axis=1) #Collapse along slit space
 		return(total_sum) #Return the integrated flux found for each line in the box defined by the user
 
+@jit #Compile JIT using numba
+def fit_mask(mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal position (in velocity space) for mask for extracting 
+	smoothed_data = median_filter(data, size=[5,5])
+	shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
+	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
+	for i in xrange(len(shift_pixels)):
+		shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
+		shifted_mask = shifted_mask_contours == 1.0 #Create new mask from shifted mask countours
+		flux = nansum(smoothed_data[shifted_mask]) - nanmedian(smoothed_data[~shifted_mask])*size(smoothed_data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
+		sigma =  sqrt( nansum(variance[shifted_mask]) ) #Calculate sigma from shifted_mask
+		s2n[i] = flux/sigma #Store S/N of mask in this position
+	if all(isnan(s2n)): #Check if everything in the s2n array is nan, if so this is a bad part of the spectrum
+		return 0 #so return a zero and move along
+	else: #Otherwise we got something decent so...
+		return shift_pixels[s2n == nanmax(s2n)][0] #Return pixel shift that maximizes the s2n
 
 
 
@@ -474,15 +495,18 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		line_flux = zeros(n_lines) #Set up array to store line fluxes
 		line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
 		line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
+		if s2n_mask > 0.0 and savepdf: #If user is using a s2n mask...
+			rolled_masks = zeros(shape(pv_data)) #Create array for storing rolled masks for later plotting, to save time computing the roll
 		for i in xrange(n_lines): #Loop through each line
 			if s2n_mask > 0.0: #If user specifies a s2n mask
-				shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
-				#stop()
-				if len(shift_mask_pixels) > 0: #Catch error
-					try:
-						use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
-					except:
-						break
+				#shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+				shift_mask_pixels = fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
+				try:
+					use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
+					if savepdf:
+						rolled_masks[i,:,:] = use_mask #store rolled mask for later plotting
+				except:
+					stop()
 			else:
 				use_mask = on_mask
 			if "use_mask" in locals(): #If mask is valid run the code, otherwise ignore code to skip errors
@@ -505,23 +529,6 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					frame = gca() #Turn off axis number labels
 					frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
 					frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
-					#frame.set_ylabel(velocity_range) #Artificially force velocity on x axis for 2D PV diagrams
-					#if s2n_mask > 0.0: #If user specifies a s2n mask
-					#	shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
-					#	stop()
-					#	use_mask = roll(on_mask, shift_mask_pixels, 1) #Set mask to be shifted to maximize S/N
-					#else:
-					#	use_mask = on_mask
-					#on_data = pv_data[i,:,:][use_mask]  #Find data inside the region for grabbing the flux
-					#on_variance = pv_variance[i,:,:][use_mask]
-					#if use_background_region: #If a backgorund region is specified
-					#	off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
-					#	background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
-					#else: #If no background region is specified by the user, use the whole field 
-					#	background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
-					#line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-					#line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
-					#line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 					if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
 						suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
@@ -541,7 +548,11 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								for t in off_text_list:
 									ax.add_artist(t)
 						if s2n_mask > 0.: #Plot s2n mask if user sets it
-							contour(roll(mask_contours, shift_mask_pixels, 1))
+							try:
+								#contour(roll(mask_contours, line_shift[i], 1))
+								contour(rolled_masks[i,:,:])
+							except:
+								stop()
 						ax = subplot(212) #Turn on "ax", set first subplot
 						pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
 						pdf.savefig() #Add figure as a page in the pdf
@@ -552,16 +563,20 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
 		self.path = path #Save path to 
-	def fit_mask(self, mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal position (in velocity space) for mask for extracting 
-		shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
-		s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
-		for i in xrange(len(shift_pixels)):
-			shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
-			shifted_mask = shifted_mask_contours == 1.0 #Create new mask from shifted mask countours
-			flux = nansum(data[shifted_mask]) - nanmedian(data[~shifted_mask])*size(data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
-			sigma =  sqrt( nansum(variance[shifted_mask]) ) #Calculate sigma from shifted_mask
-			s2n[i] = flux/sigma #Store S/N of mask in this position
-		return shift_pixels[s2n == nanmax(s2n)] #Return pixel shift that maximizes the s2n
+	# def fit_mask(self, mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal position (in velocity space) for mask for extracting 
+	# 	smoothed_data = median_filter(data, size=[5,5])
+	# 	shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
+	# 	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
+	# 	for i in xrange(len(shift_pixels)):
+	# 		shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
+	# 		shifted_mask = shifted_mask_contours == 1.0 #Create new mask from shifted mask countours
+	# 		flux = nansum(smoothed_data[shifted_mask]) - nanmedian(smoothed_data[~shifted_mask])*size(smoothed_data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
+	# 		sigma =  sqrt( nansum(variance[shifted_mask]) ) #Calculate sigma from shifted_mask
+	# 		s2n[i] = flux/sigma #Store S/N of mask in this position
+	# 	if all(isnan(s2n)): #Check if everything in the s2n array is nan, if so this is a bad part of the spectrum
+	# 		return 0 #so return a zero and move along
+	# 	else: #Otherwise we got something decent so...
+	# 		return shift_pixels[s2n == nanmax(s2n)][0] #Return pixel shift that maximizes the s2n
 	def make_latex_table(self, output_filename, s2n_cut = 3.0): #Make latex table of line fluxes
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
@@ -667,7 +682,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 						plot([min(velocity), max(velocity)], [background_level/1e3, background_level/1e3], linestyle='--', color = 'blue') #Plot background level
 					print "background_level = ",background_level
 					pdf.savefig() #Add figure as a page in the pdf
-		#dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
+		#dfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		self.velocity = velocity #Save velocity grid
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
@@ -690,7 +705,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
 def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
-		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False, savechecks=True):
+		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False, savechecks=True, mask_cosmics=False):
 	if usestd:
 		#Make 1D spectrum object for standard star
 		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
@@ -712,8 +727,8 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 	sci1d_obj.n_orders = K_sci1d_obj.n_orders + H_sci1d_obj.n_orders #Find new total number of orders
 	if twodim: #If user specifies also to make a 2D spectrum object
 		#Make 2D spectrum object
-		H_sci2d_obj =  makespec(date, 'H', waveno, frameno, twodim=True) #Read in H-band
-		K_sci2d_obj =  makespec(date, 'K', waveno, frameno, twodim=True) #Read in K-band
+		H_sci2d_obj =  makespec(date, 'H', waveno, frameno, twodim=True, mask_cosmics=mask_cosmics) #Read in H-band
+		K_sci2d_obj =  makespec(date, 'K', waveno, frameno, twodim=True, mask_cosmics=mask_cosmics) #Read in K-band
 		#if H_sci2d_obj.slit_pixel_length != K_sci2d_obj.slit_pixel_length:
 		#print 'H slit length: ', H_sci2d_obj.slit_pixel_length
 		#print 'K slit length: ', K_sci2d_obj.slit_pixel_length
@@ -789,13 +804,13 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, H=0.0, K=0.0, B=0.
 
 
 #Wrapper for easily creating a 1D or 2D comprehensive spectrum object of any type, allowing user to import an entire specturm object in one line
-def makespec(date, band, waveno, frameno, std=False, twodim=False):
+def makespec(date, band, waveno, frameno, std=False, twodim=False, mask_cosmics=False):
 	#spec_data = fits_file(date, frameno, band, std=std, twodim=twodim, s2n=s2n) #Read in data from spectrum
 	spec_data = fits_file(date, frameno, band, std=std, twodim=twodim)
 	wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
 	if twodim: #If spectrum is 2D but no variance data to be read in
 		var_data = fits_file(date, frameno, band, var2d=True) #Grab data for 2D variance cube
-		spec_obj = spec2d(wave_data, spec_data, fits_var=var_data) #Create 2D spectrum object, with variance data inputted to get S/N
+		spec_obj = spec2d(wave_data, spec_data, fits_var=var_data, mask_cosmics=mask_cosmics) #Create 2D spectrum object, with variance data inputted to get S/N
 	else: #If spectrum is 1D
 		var_data = fits_file(date, frameno, band, var1d=True) 
 		spec_obj = spec1d(wave_data, spec_data, var_data) #Create 1D spectrum object
@@ -874,7 +889,7 @@ class spec1d:
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			old_order = copy.deepcopy(order) #Make copy of flux array so the original is not modified
 			if lines != []: #If user supplies a line list
-				old_order = mask_lines(old_order, lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
+				old_order = mask_lines(old_order, lines, vrange=vrange, ndim=1) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			wave = order.wave #Read n wavelength array
 			if use_poly:
 				p_init = models.Polynomial1D(degree=4)
@@ -1093,7 +1108,7 @@ class spec1d:
 
 #Class to store and analyze a 2D spectrum
 class spec2d:
-	def __init__(self, fits_wave, fits_spec, fits_var=[]):
+	def __init__(self, fits_wave, fits_spec, fits_var=[], mask_cosmics=False):
 		wavedata = fits_wave.get() #Grab fits data for wavelength out of object
 		spec2d = fits_spec.get() #grab all fits data
 		var2d = fits_var.get() #Grab all variance data from fits file
@@ -1111,11 +1126,17 @@ class spec2d:
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			nx, ny, nz = shape(spec2d)
 			data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
+
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
 			#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
 			noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
+			if mask_cosmics: #If user specifies to filter out cosmic rays
+				#data2d_vert_sub = data2d - nanmedian(data2d, 0) #subtract vertical spectrum to get rid of sky lines and other junk
+				cosmics_found = (abs( (data2d/robust_median_filter(data2d,size=cosmic_horizontal_mask))-1.0) >cosmic_horizontal_limit) & (abs(data2d/noise2d) > cosmic_s2n_min) #Find cosmics where the signal is 100x what is expected from a 3x3 median filter
+				data2d[cosmics_found] = nan #And blank the cosmics out
+				noise2d[cosmics_found] = nan
 			orders.append( spectrum(wave1d, data2d, noise = noise2d) )
 		self.orders = orders
 		self.n_orders = n_orders
@@ -1126,7 +1147,7 @@ class spec2d:
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
 			old_order =  copy.deepcopy(order)
 			if lines != []: #If user supplies a line list
-				old_order = mask_lines(old_order, lines, vrange=vrange) #Mask out lines with nan with some velocity range, before applying continuum subtraction
+				old_order = mask_lines(old_order, lines, vrange=vrange, ndim=2) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			#stop()
 			trace = nanmedian(old_order.flux, axis=1) #Get trace of continuum from median of whole order
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
@@ -1366,6 +1387,7 @@ class lines:
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~Do a robost running median filter that ignores nan values and outliers, returns result in 1D~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+@jit #Compile Just In Time with numba
 def robust_median_filter(input_flux, size = half_block):
 	flux = copy.deepcopy(input_flux)
 	if ndim(flux) == 2: #For 2D spectrum
@@ -1387,14 +1409,17 @@ def robust_median_filter(input_flux, size = half_block):
 	return median_result
 
 #~~~~~~~~~~~~~Mask out lines based on some velocity range, used for not including wide lines in continuum subtraction~~~~~~~~~~~~~~~~~~~~~~~~
-def mask_lines(spec, linelist, vrange =[-10.0,10.0]):
+def mask_lines(spec, linelist, vrange =[-10.0,10.0], ndim=1):
 	sub_linelist = linelist.parse(nanmin(spec.wave), nanmax(spec.wave)) #Pick lines only in wavelength range
 	if len(sub_linelist.wave) > 0: #Only do this if there are lines to subtract, if not just pass through the flux array
-		for line_wave in sub_linelist.wave: #loop through each line 
+		for line_wave in sub_linelist.wave: #loop through each line
 			velocity = c * ( (spec.wave - line_wave) /  line_wave )
 			mask = (velocity >= vrange[0]) & (velocity <= vrange[1])
 			#mask = abs(spec.wave - line_wave)  < mask_size #Set up mask around an emission line
-			spec.flux[mask] = nan #Mask emission line
+			if ndim == 1: #If the number of dimensions is 1
+				spec.flux[mask] = nan #Mask emission line in 1D
+			else: #else if the number of dimensions is 2
+				spec.flux[:,mask] = nan
 	return spec #Return flux with lines masked
 
 	

@@ -10,6 +10,7 @@ from scipy.stats import linregress
 import copy
 from scipy.linalg import lstsq
 from bottleneck import *
+from numba import jit #Import numba
 
 
 #Global variables, modify
@@ -225,7 +226,7 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 					pairs.append(pair) #Save a single pair
 					observed_to_intrinsic.append((F[1]/F[2]) / (intrinsic_constants[1]/intrinsic_constants[2]))
 				wave_sets.append(waves)
-				n_trips_found = n_trips_found + 1
+				n_trips_found += 1
 
 			for pair in pairs: #Loop through each pair
 				#if pair.s2n > 0.0:
@@ -257,8 +258,8 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	if A_K == 0.0: #If user doesn onot specify what the K-band extinction A_K should be
 		A_K = input('What value of A_K do you want to use? ') #Prompt user for A_K
 	A_lambda = A_K * transitions.wave**(-a) / lambda0**(-a)
-	transitions.F = transitions.F * 10**(0.4*A_lambda)
-	transitions.sigma = transitions.sigma * 10**(0.4*A_lambda)
+	transitions.F *= 10**(0.4*A_lambda)
+	transitions.sigma *= 10**(0.4*A_lambda)
 	#suptitle('V = ' + str(V))
 
 	#stop()
@@ -437,8 +438,8 @@ class h2_transitions:
 		self.F = self.N * self.g * self.E.diff() * h * c * self.A
 	def normalize(self, label='1-0 S(1)'):
 		normalize_by_this = self.N[self.label == label]  #Grab column density of line to normalize by
-		self.N = self.N / normalize_by_this #Do the normalization
-		self.Nsigma = self.Nsigma / normalize_by_this #Ditto on the uncertainity
+		self.N /= normalize_by_this #Do the normalization
+		self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 	def thermalize(self, temperature): #Set all column densities to be thermalized at the specified temperature, normalized to the 1-0 S(1) line
 		exponential = exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
@@ -507,18 +508,19 @@ class h2_transitions:
    		lines.append(r"\endfoot")
    		lines.append(r"\hline")
    		lines.append(r"\endlastfoot")
-   		highest_v = max(self.V.u[self.s2n > s2n_cut]) #Find highest V level
-   		for v in range(1,highest_v+1): #Loop through each rotation ladder
-   			i = (self.V.u == v) & (self.s2n > s2n_cut) #Find all lines in the current ladder
-   			s = argsort(self.J.u[i]) #Sort by upper J level
-   			labels = self.label[i][s] #Grab line labels
-   			J =  self.J.u[i][s] #Grab upper J
-   			N = self.N[i][s] #Grab column density N
-   			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
-   			for j in xrange(len(labels)):
-				#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
-				lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & $" + "%1.2f" % log10(N[j]) 
-					+ r"^{+%1.2f" % (-log10(N[j]) + log10(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log10(N[j]) + log10(N[j]-sig_N[j])) +r"} $ \\") 
+   		if any(self.V.u[self.s2n > s2n_cut]): #Error catching
+   			highest_v = max(self.V.u[self.s2n > s2n_cut]) #Find highest V level
+	   		for v in range(1,highest_v+1): #Loop through each rotation ladder
+	   			i = (self.V.u == v) & (self.s2n > s2n_cut) #Find all lines in the current ladder
+	   			s = argsort(self.J.u[i]) #Sort by upper J level
+	   			labels = self.label[i][s] #Grab line labels
+	   			J =  self.J.u[i][s] #Grab upper J
+	   			N = self.N[i][s] #Grab column density N
+	   			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
+	   			for j in xrange(len(labels)):
+					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
+					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & $" + "%1.2f" % log10(N[j]) 
+						+ r"^{+%1.2f" % (-log10(N[j]) + log10(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log10(N[j]) + log10(N[j]-sig_N[j])) +r"} $ \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
@@ -527,20 +529,21 @@ class h2_transitions:
 	def save_table(self): #Output ascii table with data for making an excitation diagram
 		lines = [] #Set up array for saving lines for text file
 		lines.append('#H2 Line\twavelength [um]\tortho/para\tv_u\tJ_u\tE_u\tlog(N/g)-log(N/g)_1-0S(1)\t+sigma\t-sigma') #Header of text file listing all the columns
-		highest_v = max(self.V.u[self.N > 0.0]) #Find highest V level
-		ortho_para = ['para' ,'ortho']
-		for v in range(1,highest_v+1): #Loop through each rotation ladder
-			i = (self.V.u == v) & (self.N > 0.0)  #Find all lines in the current ladder
-			s = argsort(self.J.u[i]) #Sort by upper J level
-			labels = self.label[i][s] #Grab line labels
-			J =  self.J.u[i][s] #Grab upper J
-			N = self.N[i][s] #Grab column density N\
-			E = self.E.u[i][s]
-			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
-			wave = self.wave[i][s] #Grab wavelength of line
-			for j in xrange(len(labels)): #Loop through each rotation ladder
-				lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
-					 '\t%1.3f'  % log10(N[j]) + '\t%1.3f' %  (-log10(N[j]) + log10(N[j]+sig_N[j])) + '\t%1.3f' % (-log10(N[j]) + log10(N[j]-sig_N[j])) )
+		if any(self.V.u[self.s2n > 0.0]): #Error catching
+			highest_v = max(self.V.u[self.N > 0.0]) #Find highest V level
+			ortho_para = ['para' ,'ortho']
+			for v in range(1,highest_v+1): #Loop through each rotation ladder
+				i = (self.V.u == v) & (self.N > 0.0)  #Find all lines in the current ladder
+				s = argsort(self.J.u[i]) #Sort by upper J level
+				labels = self.label[i][s] #Grab line labels
+				J =  self.J.u[i][s] #Grab upper J
+				N = self.N[i][s] #Grab column density N\
+				E = self.E.u[i][s]
+				sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
+				wave = self.wave[i][s] #Grab wavelength of line
+				for j in xrange(len(labels)): #Loop through each rotation ladder
+					lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
+						 '\t%1.3f'  % log10(N[j]) + '\t%1.3f' %  (-log10(N[j]) + log10(N[j]+sig_N[j])) + '\t%1.3f' % (-log10(N[j]) + log10(N[j]-sig_N[j])) )
 		savetxt(self.path + '_H2_column_densities.dat', lines, fmt="%s") #Output table
 	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0.): #Fit rotation temperature to a given ladder in vibration
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
@@ -639,7 +642,7 @@ class h2_transitions:
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
 					log_N = log(self.N[ortho]) #Log of the column density
-					if sum(self.s2n[ortho]) == 0.:
+					if nansum(self.s2n[ortho]) == 0.:
 						plot(self.T[ortho], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
@@ -649,7 +652,7 @@ class h2_transitions:
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.T[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					print 'For ortho v=', i
+					#print 'For ortho v=', i
 					if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
 						#stop()
 						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[ortho], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=False, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
@@ -674,7 +677,7 @@ class h2_transitions:
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
 					log_N = log(self.N[para]) #Log of the column density
-					if sum(self.s2n[para]) == 0.:
+					if nansum(self.s2n[para]) == 0.:
 						plot(self.T[para], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
@@ -685,7 +688,7 @@ class h2_transitions:
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.T[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					print 'For para v=', i
+					#print 'For para v=', i
 					if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
 						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 						self.rot_T[para] = rt #Save rotation temperature for individual lines
@@ -699,7 +702,10 @@ class h2_transitions:
 				ylabel("Column Density   pn(N/g) [cm$^{-2}$]", fontsize=labelsize)
 			xlabel("Excitation Energy     (E$_i$/k)     [K]", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
-				xlim([0,1.4*max(self.T[self.s2n >= s2n_cut])]) #Autoscale
+				if any(self.T[self.s2n >= s2n_cut]): #Catch error
+					xlim([0,1.4*max(self.T[self.s2n >= s2n_cut])]) #Autoscale
+				else: #If no points are acutally found just set the limit here.
+					xlim([0,70000.0])
 			else: #Else if user specifies range
 				xlim(x_range) #Use user specified range for x-axis
 			if y_range[1] != 0.0: #If user specifies a y axis limit, use it
@@ -751,7 +757,7 @@ class h2_transitions:
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
 					log_N = log(self.N[ortho]) #Log of the column density
-					if sum(self.s2n[ortho]) == 0.:
+					if nansum(self.s2n[ortho]) == 0.:
 						plot(self.J.u[ortho], log_N, current_symbol,  color=current_color, label=' ', markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
@@ -761,7 +767,7 @@ class h2_transitions:
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					print 'For ortho v=', i
+					#print 'For ortho v=', i
 				else: #Else if no datapoints are found...
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				
@@ -776,7 +782,7 @@ class h2_transitions:
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
 					log_N = log(self.N[para]) #Log of the column density
-					if sum(self.s2n[para]) == 0.:
+					if nansum(self.s2n[para]) == 0.:
 						plot(self.J.u[para], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
@@ -786,7 +792,7 @@ class h2_transitions:
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					print 'For para v=', i					
+					#print 'For para v=', i					
 				else: #Else if no datapoints are found...
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 			tick_params(labelsize=14) #Set tick mark label size
@@ -837,7 +843,7 @@ class h2_transitions:
 				upperlimit =  (self.J.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(found): #If datapoints are found...
 					log_N = log(self.N[found]) #Log of the column density
-					if sum(self.s2n[found]) == 0.:
+					if nansum(self.s2n[found]) == 0.:
 						plot(self.V.u[found], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=fill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log(self.N[found]-self.Nsigma[found])), abs(log_N - log(self.N[found]+self.Nsigma[found]))] #Calculate upper and lower ends on error bars
@@ -970,6 +976,33 @@ class E:
 		self.u = self.u[sort_object] #Sort upper states
 		self.l = self.l[sort_object] #Sort lower states
 
+
+@jit
+def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, distribution, collisions=True): #Speed up radiative cascade with numba
+	transition_amount = trans_A*time
+	para = J%1==0
+	ortho = J%1==1
+	ground_J1 = (J==1) & (V==0)
+	ground_J0 = (J==0) & (V==0)
+	n_states = len(N)
+	n_lines = len(trans_A)
+	for k in xrange(iterations): #loop through however many iterations user specifies
+		store_delta_N = zeros(n_states)  #Set up array to store all the changes in N 
+		for i in xrange(n_lines):
+			delta_N = N[upper_states[i]]*transition_amount[i]
+			store_delta_N[upper_states[i]] -= delta_N
+			store_delta_N[lower_states[i]] += delta_N
+		N += store_delta_N #Modfiy level populations after the effects of all the transitions have been summed up
+		if collisions: #If user specifies to use collisions
+			N -= 0.01*N*time*V  #Apply this very crude approximation of collisional de-excitation, which favors high V
+	 	N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
+	 	N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
+	 	N[ground_J0] = 0.
+	 	N[ground_J1] = 0.
+	return N
+
+
+
 #Object for storing column densities of individual levels, and performing calculations upon them
 class states:
 	def __init__(self):
@@ -982,50 +1015,144 @@ class states:
 		self.J = J #Array to store rotation level
 		self.T = E / k #Excited energy above the ground rovibrational state in units of Kelvin
 		self.N = zeros(self.n_states) #Array for storing column densities
+		self.tau = zeros(self.n_states) #array for storing radiative lifetime
+		self.Q = zeros(self.n_states)
+		self.A_tot_in = zeros(self.n_states)
+		self.A_tot_out = zeros(self.n_states)
 		self.transitions = make_line_list() #Create transitions list 
+		self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
+		self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
+		for i in xrange(self.transitions.n_lines):
+			self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
+			self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
+		for i in xrange(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
+			transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i]) #Find transitions out of this state
+			transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i])
+			self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
+			self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
+			self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
+			self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state]) 
+		self.test_n = self.Q * self.tau
+		self.start_cascade = False #Flag if cascade has started or not
 		self.convergence = [] #Set up python list that will hold convergence of cascade
+		#UV pumping from Black & Dalgarno (1976) 
+		self.BD76_cloud_boundary_pumping = array([1.78e-11, 1.32e-11, 1.32e-11, 8.88e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.1e-11, 7.77e-12, 7.81e-12, 5.1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+		 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.06e-11, 7.02e-12, 7.23e-12, 4.64e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		  0.0, 0.0, 1.07e-11, 6.85e-12, 7.18e-12, 4.55e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.05e-11, 6.65e-12,
+		   6.96e-12, 4.4e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.01e-11, 6.43e-12, 6.7e-12, 4.24e-12, 0.0, 0.0, 0.0, 0.0, 
+		   0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.71e-12, 5.95e-12, 6.01e-12, 3.91e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		    0.0, 0.0, 0.0, 0.0, 0.0, 7.47e-12, 5.47e-12, 5.38e-12, 3.58e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.66e-12, 4.86e-12, 4.53e-12, 3.17e-12,
+		     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.62e-12, 4.6e-12, 4.1e-12, 2.99e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.36e-12, 
+		     3.89e-12, 3.07e-12, 2.51e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.39e-12, 3.66e-12, 2.77e-12, 2.41e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.45e-12, 3.8e-12, 
+		     2.88e-12, 2.49e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.36e-12, 3.55e-12, 2.69e-12, 2.29e-12, 0.0, 0.0, 0.0, 0.0, 8.71e-13, 2.29e-12, 1.58e-12, 1.27e-12])
+		self.BD76_formation_pumping = array([1.12e-14, 1.14e-13, 5.41e-12, 2.53e-13, 9.08e-14, 3.66e-13, 1.19e-13, 4.43e-13, 1.36e-13, 4.83e-13, 1.42e-13, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.91e-15, 8.09e-14, 3.84e-14, 1.8e-13, 6.46e-14, 2.59e-13, 8.43e-14, 3.14e-13, 9.6e-14, 3.43e-13, 1.01e-13, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.73e-15, 5.86e-14, 2.78e-14, 1.3e-13, 4.68e-14, 1.88e-13, 6.09e-14, 2.27e-13, 6.95e-14, 2.47e-13, 7.27e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.21e-15, 4.31e-14, 2.05e-14, 9.6e-14, 3.44e-14, 1.38e-13, 4.49e-14, 1.67e-13, 5.12e-14, 1.83e-13, 5.37e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		   0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.17e-15, 3.24e-14, 1.54e-14, 7.19e-14, 2.59e-14, 1.04e-13, 3.36e-14, 1.25e-13, 3.85e-14, 1.37e-13, 4.03e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.42e-15, 2.47e-14, 1.18e-14, 5.5e-14, 1.98e-14, 7.94e-14, 2.58e-14, 9.6e-14, 2.94e-14, 1.05e-13, 3.09e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+		     0.0, 0.0, 0.0, 0.0, 1.89e-15, 1.93e-14, 9.17e-15, 4.29e-14, 1.54e-14, 6.18e-14, 2.01e-14, 7.48e-14, 2.29e-14, 8.16e-14, 2.4e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
+		     1.5e-15, 1.53e-14, 7.27e-15, 3.41e-14, 1.23e-14, 4.91e-14, 1.59e-14, 5.95e-14, 1.83e-14, 6.49e-14, 1.91e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.22e-15, 1.25e-14, 5.9e-15, 2.76e-14,
+		      9.95e-15, 3.99e-14, 1.3e-14, 4.83e-14, 1.48e-14, 5.26e-15, 1.55e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1e-15, 1.03e-14, 4.88e-15, 2.28e-14, 8.22e-15, 3.3e-14, 1.07e-14, 3.99e-14, 1.22e-14,
+		       4.35e-14, 1.28e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.5e-16, 8.74e-15, 4.13e-15, 1.93e-14, 6.95e-15, 2.79e-14, 9.08e-15, 3.37e-14, 1.03e-14, 3.68e-14, 1.08e-14, 0.0, 0.0, 0.0, 0.0, 7.37e-16, 
+		       7.53e-15, 3.57e-15, 1.68e-14, 6.02e-15, 2.41e-14, 7.85e-15, 2.92e-14, 9e-15, 3.18e-14, 9.43e-15, 0.0, 0.0, 6.55e-16, 6.7e-15, 3.18e-15, 
+			1.49e-14, 5.35e-15, 2.15e-14, 6.97e-15, 2.6e-14, 7.97e-15, 2.84e-14, 8.35e-15, 6.01e-16, 6.15e-15, 2.92e-15, 1.37e-14, 4.91e-15, 1.94e-14, 6.4e-15, 2.39e-14, 7.31e-15, 2.6e-14, 7.66e-15, 5.7e-16])
+		#self.BD76_cloud_center_pumping = 
 	def total_N(self): #Grab total column density N and return it
 		return nansum(self.N) #Return total column density of H2
-	def cascade(self, time=1.0, temp=100.0, quick=0, showplot=True): #Do a step in the radiative cascade
-		store_delta_N = zeros(self.n_states)  #Set up array to store all the changes in N 
+	def cascade(self, time=1.0, temp=25000.0, quick=0, showplot=True, iterations=1): #Do a step in the radiative cascade
 		V = self.V #Assign variables to speed up loop
 		J = self.J
 		N = self.N
-		trans_V_u = self.transitions.V.u
-		trans_V_l = self.transitions.V.l
-		trans_J_u = self.transitions.J.u
-		trans_J_l = self.transitions.J.l
+		#trans_V_u = self.transitions.V.u
+		#trans_V_l = self.transitions.V.l
+		#trans_J_u = self.transitions.J.u
+		#trans_J_l = self.transitions.J.l
 		trans_A = self.transitions.A
-		if quick != 0: #If user wants to speed up the cascade
-			maxthresh = -partsort(-trans_A,quick)[quick-1] #Find threshold for maximum
-		else:
-			maxthresh = 0. #E
-		for i in xrange(len(self.transitions.J.u)): #Loop through each transition
-			if trans_A[i] > maxthresh:
-				#Ju = self.transitions.J.u[i] #Grab upper and lower J levels for this transition
-				#Jl = self.transitions.J.l[i]
-				#Vu = self.transitions.V.u[i] #Grab upper and lower V levels for this transition
-				#Vl = self.transitions.V.l[i]
-				upper_state = logical_and(V == trans_V_u[i], J == trans_J_u[i])#Finder upper state of transition
-				lower_state = logical_and(V == trans_V_l[i], J == trans_J_l[i])#Find loer state of transition
-				delta_N = N[upper_state]*trans_A[i]*time #Move this much H2 around with this transition
-				#print 'delta_N=', delta_N
-				#delta_N = self.N[upper_state]*(1.0 - exp(-self.transitions.A[i]*time) )#Move this much H2 around with this transition
-				store_delta_N[upper_state] = store_delta_N[upper_state] - delta_N #Store change in N taken out of upper state by this transition
-				store_delta_N[lower_state] = store_delta_N[lower_state] + delta_N #Store change in N put into lower state by this transition
-		old_N = copy.deepcopy(self.N)
-		N = N + store_delta_N #Modfiy level populations after the effects of all the transitions have been summed up
-		j = V == 12
-		exponential = exp(-self.T[j]/temp) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
+		upper_states = self.transitions.upper_states
+		lower_states = self.transitions.lower_states
+		#if quick != 0: #If user wants to speed up the cascade
+		#	maxthresh = -partsort(-trans_A,quick)[quick-1] #Find threshold for maximum
+		#else:
+		#	maxthresh = 0. #E
+		exponential = exp(-self.T/temp) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltmann_distribution = exponential / nansum(exponential)
-		#self.N[1:] = self.N[1:] + self.N[0] / (float(self.n_states)-1.0) #Crudely redistribute everything in the ground state back to all other states
- 		#N[1:] = N[1:] + boltmann_distribution[1:]*N[0]
- 		#N[j] = N[j] + boltmann_distribution*N[0]
- 		N[j] = N[j] + boltmann_distribution*time
+		ground_J1 = (J==1) & (V==0)
+		ground_J0 = (J==0) & (V==0)
+		if not self.start_cascade: #If cascade has not started yet 
+			#N = boltmann_distribution #preset the population to be the boltzmann distribution
+			#N = (1.-(J/10.)) + (1.-(V/14.0)) #Set populations based on V and J
+			N = zeros(self.n_states)
+			#N[(V==14) & (J==1)] = 1.0
+			#N = self.BD76_formation_pumping
+			#N = self.BD76_cloud_boundary_pumping
+			#N = exp(-(0.5*(J+1)+0.3*(V+1)))
+	 		N[V>-1] = exp(-(0.25*(J[V>-1]-1)+0.2*(V[V>-1]-1)))
+	 		N[ground_J0] = 0.
+	 		N[ground_J1] = 0.
+			#N = exp(-J.astype(float)-V.astype(float))
+			#N = ones(self.n_states)
+			#N[V==0] == 0.
+			N = N/sum(N) #Normalize
+			self.distribution = copy.deepcopy(N)
+			self.start_cascade = True #Then flip the flag so that the populations stay as they are
+		old_N = copy.deepcopy(self.N)
+
+		N = run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, self.distribution, collisions=False) #Test cascade with numba
+		# transition_amount = trans_A*time
+		# para = J%1==0
+		# ortho = J%1==1
+		# for k in xrange(iterations): #loop through however many iterations user specifies
+		# 	#delta_N = N*trans_A[upper_states]*time
+		# 	#store_delta_N -= delta_N
+		# 	#store_delta_N += delta_N
+		# 	#for i in xrange(self.n_states):
+		# 	#	u = upper_states==i
+		# 	#	l = lower_states==i
+		# 	#	store_delta_N[i] -= N[i]*sum(trans_A[u])*time
+		# 	#	store_delta_N[i] += sum(N[l]*trans_A[l])*time
+		# 	store_delta_N = zeros(self.n_states)  #Set up array to store all the changes in N 
+		# 	delta_N = N[upper_states]*transition_amount #Move this much H2 around with this transition
+		# 	for i in xrange(self.n_states):
+		# 		store_delta_N[i] = nansum(delta_N[lower_states == i]) - nansum(delta_N[upper_states == i])
+		# 	#store_delta_N[upper_states] -= delta_N
+		# 	#store_delta_N[lower_states] += delta_N
+		# 	#for i in xrange(self.transitions.n_lines): #Loop through each transition
+		# 	# 	#if trans_A[i] > maxthresh: #Select only certain transitions below a certain A to be important, to optimize code
+		# 	# 		#Ju = self.transitions.J.u[i] #Grab upper and lower J levels for this transition
+		# 	# 		#Jl = self.transitions.J.l[i]
+		# 	# 		#Vu = self.transitions.V.u[i] #Grab upper and lower V levels for this transition
+		# 	# 		#Vl = self.transitions.V.l[i]
+		# 	# 		#upper_state = logical_and(V == trans_V_u[i], J == trans_J_u[i])#Finder upper state of transition
+		# 	# 		#lower_state = logical_and(V == trans_V_l[i], J == trans_J_l[i])#Find loer state of transition
+		# 	# 		#upper_state = (V == trans_V_u[i]) & (J == trans_J_u[i])#Finder upper state of transition
+		# 	# 		#lower_state = (V == trans_V_l[i]) & (J == trans_J_l[i])#Find loer state of transition
+			 		
+		# 	 		#store_delta_N[upper_states[i], lower_states[i]] += [-delta_N, delta_N] #Try some vectorization
+		# 			#print 'delta_N=', delta_N
+		# 	# 		#delta_N = self.N[upper_state]*(1.0 - exp(-self.transitions.A[i]*time) )#Move this much H2 around with this transition
+		# 	# 		store_delta_N[upper_states[i]] -= delta_N[i] #Store change in N taken out of upper state by this transition
+		# 	# 		store_delta_N[lower_states[i]] += delta_N[i] #Store change in N put into lower state by this transition
+		# 	N += store_delta_N #Modfiy level populations after the effects of all the transitions have been summed up
+		# 	#self.N[1:] = self.N[1:] + self.N[0] / (float(self.n_states)-1.0) #Crudely redistribute everything in the ground state back to all other states
+	 # 		#N[1:] = N[1:] + boltmann_distribution[1:]*N[0]
+	 # 		#N[j] = N[j] + boltmann_distribution*N[0]
+	 # 		#stop()
+	 # 		N[para] += self.distribution[para]*(N[ground_J0] + 0.5*(1.0-nansum(N)))
+	 # 		N[ortho] += self.distribution[ortho]*(N[ground_J1] + 0.5*(1.0-nansum(N)))
+	 # 		#N[J%1==0] += boltmann_distribution[J%1==0]*N[ground_J0]
+	 # 		#N[J%1==1] += boltmann_distribution[J%1==1]*N[ground_J1]
+	 # 		N[ground_J0] = 0.
+	 # 		N[ground_J1] = 0.
+	 # 		#stop()
+	 # 		#N[V>0] += self.distribution*sum(N[V==0])
+	 # 		#N[V==0] = 0.
+
+	 		
  		#N[285] = N[285] + N[0] #Test just dumping everything into the final level and let everything cascade out of it.
- 		
  		#N[0]  = 0.0 #Empty out ground state after redistributing all the molecules in the ground
- 		convergence_measurement = nansum((N-old_N)**2)
+ 		convergence_measurement = (nansum((N-old_N)))**2
  		print 'convergence = ', convergence_measurement
  		self.convergence.append(convergence_measurement)#Calculate convergence from one step to the 
  		self.N = N
