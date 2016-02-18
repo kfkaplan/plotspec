@@ -929,7 +929,7 @@ class spec1d:
 		if show: #If you want to watch the continuum subtraction
 			legend() #Show the legend in the plot
 
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
+	def normalize_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			old_order = copy.deepcopy(order) #Make copy of flux array so the original is not modified
 			if lines != []: #If user supplies a line list
