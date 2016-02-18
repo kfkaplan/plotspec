@@ -14,8 +14,8 @@ from numba import jit #Import numba
 
 
 #Global variables, modify
-single_temp = 1500.0 #K
-single_temp_y_intercept = 22.0
+default_single_temp = 1500.0 #K
+default_single_temp_y_intercept = 22.0
 alpha = arange(0.0, 10.0, 0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
 lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
 wave_thresh = 0.0 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
@@ -36,6 +36,15 @@ color_list = ['black','gray','darkorange','blue','red','green','orange','magenta
 symbol_list = ['o','v','8','x','s','*','h','D','^','8','1','o','o','o','o','o','o','o'] #Symbol list for rotation ladders on black and white Boltzmann plot
 #for c in matplotlib.colors.cnames:
     #color_list.append(c)
+
+# def plot_with_subtracted_temperature(transitions):
+# 	# row and column sharing
+# 	f, axs = subplots(8, 2, sharex='col', sharey='row')
+# 	for x in range(8):
+# 		axs[i]
+
+
+
 
 def get_surface(h2obj, v_range=[2,13], s2n_cut=-1.0): #Find and plot the "fundamental plane"
 	x = h2obj.J.u #Set up x,y,z for all data points
@@ -157,6 +166,20 @@ def make_line_list():
 	transitions = h2_transitions(J_obj, V_obj, E_obj, A) #Create main transitions object
 	return transitions #Return transitions object
 
+#Test extinction correction by animating stepping through alpha and A_K space and making v_plots of the results
+def animate_extinction_correction(h_in):
+	with PdfPages('animate_extinction_correction.pdf') as pdf:
+		for a in [0.5,1.0,1.5,2.0,2.5,3.0]:
+			for A_K in arange(0.0,3.0,0.1):
+				h = copy.deepcopy(h_in)
+				A_lambda = A_K * h.wave**(-a) / lambda0**(-a)
+				h.F *= 10**(0.4*A_lambda)
+				h.calculate_column_density()
+				h.v_plot()
+				suptitle('alpha = '+str(a)+'    A_K = '+str(A_K))
+				pdf.savefig()
+
+
 #Iterate adding extinction curves until you are satisfied
 def iterate_extinction_curve(transitions):
 	a = input('What value of alpha do you want to use? ') #Prompt from user what alpha should be
@@ -229,15 +252,16 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 				n_trips_found += 1
 
 			for pair in pairs: #Loop through each pair
-				#if pair.s2n > 0.0:
-				pair.fit_curve()
-				figure(1)
-				plot(alpha, pair.A_K, color=color_list[V], label = 'V = '+str(V) + ' J = ' + str(J))
-				plot(alpha, pair.A_K + pair.sigma_A_K, '--', color=color_list[V])
-				plot(alpha, pair.A_K - pair.sigma_A_K, '--', color=color_list[V])
-				f = interp1d(alpha, pair.A_K)
-				g = interp1d(alpha, pair.sigma_A_K)
-				print 'V = ', str(V), 'J = ', str(J),' at alpha=2, A_K = ', f(2.0), '+/-', g(2.0)
+				if pair.s2n > 3.0:
+					pair.fit_curve()
+					figure(1)
+					plot(alpha, pair.A_K, color=color_list[V], label = 'V = '+str(V) + ' J = ' + str(J))
+					plot(alpha, pair.A_K + pair.sigma_A_K, '--', color=color_list[V])
+					plot(alpha, pair.A_K - pair.sigma_A_K, '--', color=color_list[V])
+					f = interp1d(alpha, pair.A_K)
+					g = interp1d(alpha, pair.sigma_A_K)
+					print 'V = ', str(V), 'J = ', str(J),' at alpha=2, A_K = ', f(2.0), '+/-', g(2.0)
+					print 'for pair at waves', str(pair.waves[0]), ' & ', str(pair.waves[1]), ' A_delta_lambda=', str(pair.A)
 			pairs  = []
 		xlabel('Alpha')
 		ylabel('$A_K$')
@@ -265,6 +289,23 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	#stop()
 	print 'Number of pairs from same upper state = ', n_doubles_found
 	print 'Number of tripples from same upper state = ', n_trips_found
+
+
+
+
+##Store differential extinction between two transitions from the same upper state
+class differential_extinction:
+	def __init__(self, waves, A, sigma): #Input the lambda, flux, and sigma of two different lines as paris [XX,XX]
+		self.waves = waves  #Store the wavleneghts as lamda[0] and lambda[1]
+		self.A = A #Store differential extinction
+		self.sigma = sigma #Store uncertainity in differential extinction A
+		self.s2n = A / sigma
+	def fit_curve(self):
+		#constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
+		self.A_K = self.A * constants #calculate extinction for a given power law alpha
+		self.sigma_A_K = self.sigma * constants #calculate extinction for a given power law alpha
+
+
 	
 def import_cloudy(): #Import cloudy model from cloudy directory
 	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model
@@ -377,19 +418,6 @@ class emissivity:
     #             pdf.savefig() #Output page of pdf
 
 
-
-##Store differential extinction between two transitions from the same upper state
-class differential_extinction:
-	def __init__(self, waves, A, sigma): #Input the lambda, flux, and sigma of two different lines as paris [XX,XX]
-		self.waves = waves  #Store the wavleneghts as lamda[0] and lambda[1]
-		self.A = A #Store differential extinction
-		self.sigma = sigma #Store uncertainity in differential extinction A
-		self.s2n = A / sigma
-	def fit_curve(self):
-		constants = lambda0**(-alpha) / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) )
-		#constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
-		self.A_K = self.A * constants #calculate extinction for a given power law alpha
-		self.sigma_A_K = self.sigma * constants #calculate extinction for a given power law alpha
 
 
 
@@ -545,10 +573,10 @@ class h2_transitions:
 					lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
 						 '\t%1.3f'  % log10(N[j]) + '\t%1.3f' %  (-log10(N[j]) + log10(N[j]+sig_N[j])) + '\t%1.3f' % (-log10(N[j]) + log10(N[j]-sig_N[j])) )
 		savetxt(self.path + '_H2_column_densities.dat', lines, fmt="%s") #Output table
-	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0.): #Fit rotation temperature to a given ladder in vibration
+	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0., show=True): #Fit rotation temperature to a given ladder in vibration
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
 		if rot_temp_energy_limit > 0.: #If user specifies to cut rotation temp fit, use that....
-			usepts = (T < rot_temp_energy_limit) & isfinite(log_N)
+			usepts = (T < rot_temp_energy_limit) & isfinite(log_N) 
 			print 'debug time! Log_N[usepts]=', log_N[usepts]
 			fit, cov = curve_fit(linear_function, T[usepts], log_N[usepts], sigma=log_N_sigma[usepts], absolute_sigma=False) #Do weighted linear regression fit
 		else: #Else fit all points
@@ -562,14 +590,17 @@ class h2_transitions:
 		#y = polyval(fit, T) #Get y positions of rotation temperature fit
 		y = linear_function(T, fit[0], fit[1]) #Get y positions of rotation temperature fit
 		y_sigma = sqrt(cov[0,0]*T**2 + 2.0*cov[0,1]*T + cov[1,1]) #Grab uncertainity in fit for a given y value and the covariance matrix, see Pg 125 of the Math Methods notes
-		plot(T, y, color=color, linestyle=linestyle) #Plot T rot fit
+		if show: #If user wants to plot lines
+			plot(T, y, color=color, linestyle=linestyle) #Plot T rot fit
 		#plot(T, y+y_sigma, color=color, linestyle='--') #Plot uncertainity in T rot fit
 		#plot(T, y-y_sigma, color=color, linestyle='--')
 		rot_temp = -1.0/slope #Calculate the rotation taemperature
 		sigma_rot_temp = rot_temp * (sigma_slope/abs(slope)) #Calculate uncertainity in rotation temp., basically just scale fractional error
 		print 'rot_temp = ', rot_temp,'+/-',sigma_rot_temp
-		residuals = e**log_N - e**y #Calculate residuals in fit, but put back in linear space
-		sigma_residuals = sqrt( (e**(y + y_sigma) - e**y)**2 + (e**(log_N + log_N_sigma)-e**log_N)**2 ) #Calculate uncertainity in residuals from adding uncertainity in fit and data points together in quadarature
+		#residuals = e**log_N - e**y #Calculate residuals in fit, but put back in linear space
+		#sigma_residuals = sqrt( (e**(y + y_sigma) - e**y)**2 + (e**(log_N + log_N_sigma)-e**log_N)**2 ) #Calculate uncertainity in residuals from adding uncertainity in fit and data points together in quadarature
+		residuals = e**(log_N-y)
+		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
 	def compare_model(self, h2_model, name='compare_model_excitation_diagrams'): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data
 		fname = self.path + '_'+name+'.pdf'
@@ -601,9 +632,27 @@ class h2_transitions:
 				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
 					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False, s2n_cut=s2n_cut)
 					pdf.savefig()
+	def plot_rot_temp_fit(self, s2n_cut = 3.0, V = range(0,14)): #Fit and plot rotation temperatures then show their residuals
+		fname = self.path + '_rotation_temperature_fits_and_residuals_all.pdf' #Set filename
+		with PdfPages(fname) as pdf: #Make a pdf
+			self.v_plot(V=V, show_labels=False, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut)
+			pdf.savefig()
+		for i in V:
+			fname = self.path + '_rotation_temperature_fits_V'+str(i)+'.pdf'
+			with PdfPages(fname) as pdf: #Make a pdf
+				title('V = '+str(i))
+				self.v_plot(V=[i], show_labels=True, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True) #Plot single rotation ladder + rot temp fit
+				pdf.savefig()
+			fname = self.path + '_rotation_temperature_residuals_V'+str(i)+'.pdf'
+			with PdfPages(fname) as pdf: #Make a pdf
+				title('V = '+str(i)+' residuals')
+				self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True, show_legend=False) #Plot residuals
+				pdf.savefig()
+   	#Make simple plot first showing all the different rotational ladders for a constant V
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
-   		fname='', clear=True, legend_fontsize=14, line=False): #Make simple plot first showing all the different rotational ladders for a constant V
+   		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp,
+   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -625,6 +674,26 @@ class h2_transitions:
 				use_upper_v_states = unique(self.V.u) #plot every one found
 			else: #or else...
 				use_upper_v_states = V #Plot upper V s tates specified by the user
+			if subtract_single_temp: #If user wants to subtract the single temperature
+				x = arange(0,200000, 10) #Set up an ax axis 
+				interp_single_temp = interp1d(x, single_temp_y_intercept - (x / single_temp), kind='linear') #create interpolation object for the single temperature
+				data_single_temp = interp_single_temp(self.T) #Create array of the single temperature for subtraction from the column density later on
+				log_N = log(self.N) - data_single_temp #Log of the column density
+				plus_one_sigma = abs(log_N  + data_single_temp - log(self.N + self.Nsigma))
+				minus_one_sigma = abs(log_N + data_single_temp - log(self.N - self.Nsigma))
+				upper_limits = log(self.Nsigma*3.0) - data_single_temp
+			elif rot_temp_residuals: #If user has previously calculated rotation temperatures for each ladder, here they can show the residuals after subtracting the linear fits 
+				log_N = log(self.res_rot_T)
+				plus_one_sigma = abs(log_N  - log(self.res_rot_T + self.Nsigma))
+				minus_one_sigma = abs(log_N - log(self.res_rot_T - self.Nsigma))
+				upper_limits = log(self.Nsigma*3.0)
+			else: #Default to simply plotting the column densities and their error bars
+				log_N = log(self.N) #Log of the column density
+				plus_one_sigma = abs(log_N  - log(self.N + self.Nsigma))
+				minus_one_sigma = abs(log_N - log(self.N - self.Nsigma))
+				upper_limits = log(self.Nsigma*3.0)
+			#plus_one_sigma = abs(log_N - data_single_temp - log(self.N - exp(data_single_temp) + self.Nsigma)) #Upper 1 sigma errors in log space
+			#minus_one_sigma = abs(log_N - data_single_temp  - log(self.N - exp(data_single_temp) - self.Nsigma)) #Lower 1 sigma errors in log space
 			for i in use_upper_v_states:
 				if nocolor: #If user specifies no color,
 					current_color = 'gray'
@@ -641,21 +710,20 @@ class h2_transitions:
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
-					log_N = log(self.N[ortho]) #Log of the column density
 					if nansum(self.s2n[ortho]) == 0.:
-						plot(self.T[ortho], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						plot(self.T[ortho], log_N[ortho], current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
-						y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
-						errorbar(self.T[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						y_error_bars = [minus_one_sigma[ortho], plus_one_sigma[ortho]] #Calculate upper and lower ends on error bars
+						errorbar(self.T[ortho], log_N[ortho], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.T[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N)): #Loop through each point to label
-							text(self.T[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+						for j in xrange(len(log_N[ortho])): #Loop through each point to label
+							text(self.T[ortho][j], log_N[ortho][j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					#print 'For ortho v=', i
-					if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
+					if rot_temp and len(log_N[ortho][isfinite(log_N[ortho])]) > 1: #If user specifies fit rotation temperature
 						#stop()
-						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[ortho], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=False, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
+						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[ortho], log_N[ortho], y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=False, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 						self.rot_T[ortho] = rt #Save rotation temperature for individual lines
 						self.sig_rot_T[ortho] = srt #Save rotation tempreature uncertainity for individual lines
 						self.res_rot_T[ortho] = residuals #Save residuals for individual data points from the rotation tmeperature fit
@@ -676,34 +744,43 @@ class h2_transitions:
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
-					log_N = log(self.N[para]) #Log of the column density
 					if nansum(self.s2n[para]) == 0.:
-						plot(self.T[para], log_N, current_symbol,  color=current_color, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						plot(self.T[para], log_N[para], current_symbol,  color=current_color, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
-						y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
+						y_error_bars = [minus_one_sigma[para], plus_one_sigma[para]] #Calculate upper and lower ends on error bars
 						#errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
-						errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						errorbar(self.T[para], log_N[para], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.T[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N)): #Loop through each point to label
-							text(self.T[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+						for j in xrange(len(log_N[para])): #Loop through each point to label
+							text(self.T[para][j], log_N[para][j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					#print 'For para v=', i
-					if rot_temp and len(log_N[isfinite(log_N)]) > 1: #If user specifies fit rotation temperature
-						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N, y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
+					if rot_temp and len(log_N[para][isfinite(log_N[para])]) > 1: #If user specifies fit rotation temperature
+						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N[para], y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 						self.rot_T[para] = rt #Save rotation temperature for individual lines
 						self.sig_rot_T[para] = srt #Save rotation tempreature uncertainity for individual lines
 						self.res_rot_T[para] = residuals #Save residuals for individual data points from the rotation tmeperature fit
 						self.sig_res_rot_T[para] = sigma_residuals #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)						
+					elif rot_temp and len(log_N[para][isfinite(log_N[para])]) <= 1:
+						self.rot_T[para] = 0 #Save rotation temperature for individual lines
+						self.sig_rot_T[para] = 0 #Save rotation tempreature uncertainity for individual lines
+						self.res_rot_T[para] = ones(len(log_N[para])) #Save residuals for individual data points from the rotation tmeperature fit
+						self.sig_res_rot_T[para] = self.Nsigma[para] #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)						
 			tick_params(labelsize=14) #Set tick mark label size
-			if normalize: #If normalizing to the 1-0 S(1) line
-				ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
-			else:  #If using absolute flux calibrated data
-				ylabel("Column Density   pn(N/g) [cm$^{-2}$]", fontsize=labelsize)
-			xlabel("Excitation Energy     (E$_i$/k)     [K]", fontsize=labelsize, labelpad=4)
+			if show_axis_labels: #By default print the axis labels, but the user can turn these off if so desired (replacing them with custom labels if needed)
+				if normalize: #If normalizing to the 1-0 S(1) line
+					ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+				else:  #If using absolute flux calibrated data
+					ylabel("Column Density   ln(N/g) [cm$^{-2}$]", fontsize=labelsize)
+				xlabel("Excitation Energy     (E$_i$/k)     [K]", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
-				if any(self.T[self.s2n >= s2n_cut]): #Catch error
-					xlim([0,1.4*max(self.T[self.s2n >= s2n_cut])]) #Autoscale
+				if any(self.T[self.s2n >= s2n_cut]) and not no_zero_x: #Catch error
+					goodpix = (self.s2n >= s2n_cut) 
+					xlim([0,1.4*max(self.T[goodpix])]) #Autoscale with left side of x set to zero
+				elif any(self.T[self.s2n >= s2n_cut]) and no_zero_x: #If user does not want left side of x set to zero
+					goodpix = (self.s2n >= s2n_cut) & (self.V.u == V[0])
+					xlim([0.9*min(self.T[goodpix]), 1.1*max(self.T[goodpix])]) #Autoscale with left side of x not fixed at zero
 				else: #If no points are acutally found just set the limit here.
 					xlim([0,70000.0])
 			else: #Else if user specifies range
