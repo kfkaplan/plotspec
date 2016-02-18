@@ -936,7 +936,7 @@ class spec1d:
 				old_order = mask_lines(old_order, lines, vrange=vrange, ndim=1) #Mask out lines with nan with some velocity range, before applying continuum subtraction
 			wave = order.wave #Read n wavelength array
 			median_result_1d = robust_median_filter(old_order.flux, size = size) #Take a robust running median along the trace, this is the found continuum
-			normalzied_flux = order.flux / median_result_1d #Normalize continuum 
+			normalized_flux = order.flux / median_result_1d #Normalize continuum 
 			order.flux = normalized_flux #Replace this order's flux array with one that has been continuum normalized
 	def combine_orders(self, wave_pivot = default_wave_pivot): #Sitch orders together into one long spectrum
 		combospec = copy.deepcopy(self.orders[0]) #Create a spectrum object to append wavelength and flux to
