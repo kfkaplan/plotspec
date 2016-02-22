@@ -1,4 +1,4 @@
-It could be some unusual combination of both astronomy and physics, perhaps we could call it 'astrophysics?"#This library will eventually be the ultimate IGRINS emission line viewability/analysis code
+#This library will eventually be the ultimate IGRINS emission line viewability/analysis code
 #
 #start as test_new_plotspec.py
 
