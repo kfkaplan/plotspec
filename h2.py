@@ -18,7 +18,7 @@ default_single_temp = 1500.0 #K
 default_single_temp_y_intercept = 22.0
 alpha = arange(0.0, 10.0, 0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
 lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
-wave_thresh = 0.0 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
+wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
 cloudy_dir = '/Users/kfkaplan/Dropbox/cloudy/'
@@ -39,7 +39,7 @@ symbol_list = ['o','v','8','x','s','*','h','D','^','8','1','o','o','o','o','o','
 
 # def plot_with_subtracted_temperature(transitions):
 # 	# row and column sharing
-# 	f, axs = subplots(8, 2, sharex='col', sharey='row')
+# 	f, axs = subplots(8, 2, sharex='col', sharey='row')v
 # 	for x in range(8):
 # 		axs[i]
 
@@ -291,7 +291,71 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	print 'Number of tripples from same upper state = ', n_trips_found
 
 
+#Test printing intrinsic ratios, for debugging/diagnosing extinction
+def test_intrinsic_ratios(transitions):
+	clf()
+	n_doubles_found = 0 #Count doubles (pair from same upper state)
+	n_trips_found = 0 #Count trips
+	#i = (transitions.N != 0.0) & (transitions.s2n > 10.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	i = (transitions.F != 0.0) & (transitions.s2n > 0.5) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	J_upper_found = unique(transitions.J.u[i]) #Find J for all (detected) transition upper states
+	V_upper_found = unique(transitions.V.u[i]) #Find V for all (detected) transition upper states
+	lines_found = []
+	for V in V_upper_found: #Check each upper V for pairs		
+		for J in J_upper_found: #Check each upper J for pairs
+			match_upper_states = (transitions.J.u[i] == J) & (transitions.V.u[i] == V) #Find all transitions from the same upper J and V state
+			waves = transitions.wave[i][match_upper_states] #Store wavelengths of all found transitions
+			s = argsort(waves) #sort by wavelength
+			#N = transitions.N[i][match_upper_states] #Store all column densities for found transitions
+			#F = transitions.F[i][match_upper_states] 
+			#Fsigma = transitions.sigma[i][match_upper_states] 
+			#intrinsic_constants =  (transitions.g[i][match_upper_states] * transitions.E.diff()[i][match_upper_states] * transitions.A[i][match_upper_states]) #Get constants for calculating the intrinsic ratios
+			waves = waves[s]
+			labels = transitions.label[i][match_upper_states][s]
+			#Nsigma = transitions.Nsigma[i][match_upper_states] #Grab uncertainity in column densities
+			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
+				print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+				#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True)
+				#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
+				ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
+				print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+				plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
+				lines_found.append(labels[0]) #Store line labels of lines found
+				lines_found.append(labels[1])
+			elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
+				lines_found.append(labels[0]) #Store line labels of lines found
+				lines_found.append(labels[1])
+				lines_found.append(labels[2])
+				#Pair 1
+				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
+					print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+					#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True)
+					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
+					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
 
+				#Pair 2
+				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
+					print 'For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':'
+					#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[2], sigma=True)
+					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[2])
+					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[2])
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					plot([waves[0],waves[2]], [ratio_of_ratios[0], 1.])
+				#Pair 3
+					print 'For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':'
+					#print '     Observed ratio: ', transitions.flux_ratio(labels[1], labels[2], sigma=True)
+					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[1], labels[2])
+					ratio_of_ratios = transitions.flux_ratio(labels[1], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[1], labels[2])
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					plot([waves[1],waves[2]], [ratio_of_ratios[0], 1.])
+				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+					n_trips_found += 1
+	#stop()
+	print 'Number of pairs from same upper state = ', n_doubles_found
+	print 'Number of tripples from same upper state = ', n_trips_found
+	#return lines_found
 
 ##Store differential extinction between two transitions from the same upper state
 class differential_extinction:
@@ -301,7 +365,7 @@ class differential_extinction:
 		self.sigma = sigma #Store uncertainity in differential extinction A
 		self.s2n = A / sigma
 	def fit_curve(self):
-		#constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
+		constants = lambda0**alpha / ( self.waves[0]**(-alpha) - self.waves[1]**(-alpha) ) #Calculate constants to mulitply A_delta_lambda by to get A_K
 		self.A_K = self.A * constants #calculate extinction for a given power law alpha
 		self.sigma_A_K = self.sigma * constants #calculate extinction for a given power law alpha
 
@@ -317,16 +381,30 @@ def import_cloudy(): #Import cloudy model from cloudy directory
 	plot_dir = paths.readline().split(' ')[0]
 	table_dir =  paths.readline().split(' ')[0]
 	paths.close()
-	filename = data_dir+model+".h2.coldens" #Name of file to open
+	filename = data_dir+model+'.h2.lines'
+	#filename = data_dir+model+".h2.coldens" #Name of file to open
 	#stop()
-	v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
-	h2_transitions = make_line_list() #Make H2 transitions object
-	for i in xrange(len(v)): #Loop through each rovibrational energy level
-		found_transitions = (h2_transitions.V.u == v[i]) & (h2_transitions.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
-		h2_transitions.N[found_transitions] = N_over_g[i] #Set column density of transitions
+	#COMMENT OUT COLUMN DENSITY FILE FOR NOW
+	#v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
+	#Read in data from xxxx.h2
+	#line, Ehi, Vhi, Jhi, Elo, Vlo, Jlo, wl_mic, wl_lab, log_L, I_ratio, Excit, gu_h_nu_aul = genfromtxt(data_dir+model+'.h2', unpack=True, dtype='a', delimiter='\t')
+	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
+	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
+	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
+	L=10**log_L #Convert log luminosity to linear units
+
+	h = make_line_list() #Make H2 transitions object
+	for i in xrange(len(L)): #Loop through each transition
+		current_transition = (h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i]) #Find current transition in h2 transitions object for list of H2 lines cloudy outputs
+		h.F[current_transition] = L[i] #Set flux to be equal to the luminosity of the line outputted by cloudy
+
+	#for i in xrange(len(v)): #Loop through each rovibrational energy level
+	#	found_transitions = (h.V.u == v[i]) & (h.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
+#		h2_transitions.N[found_transitions] = N_over_g[i] #Set column density of transitions
+	h.calculate_column_density()
 	#h2_transitions.N = h2_transitions.N / h2_transitions.N[h2_transitions.label == '1-0 S(1)']
-	h2_transitions.normalize() #Normalize to the 1-0 S(1) line
-	return(h2_transitions)
+	h.normalize() #Normalize to the 1-0 S(1) line
+	return(h)
 
 def import_emissivity(x_range=[4.25e17, 4.5e17], dr=5e15): #Import Cloudy model emmisivity adn integrate using given range
 	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model
@@ -464,7 +542,7 @@ class h2_transitions:
 			#self.Nsigma = self.Nsigma / N_10_S1 #Normalize uncertainity
 	def calculate_flux(self): #Calculate flux for a given calculated column density (ie. if you set it to thermalize)
 		self.F = self.N * self.g * self.E.diff() * h * c * self.A
-	def normalize(self, label='1-0 S(1)'):
+	def normalize(self, label='5-3 O(3)'):
 		normalize_by_this = self.N[self.label == label]  #Grab column density of line to normalize by
 		self.N /= normalize_by_this #Do the normalization
 		self.Nsigma /= normalize_by_this #Ditto on the uncertainity
@@ -479,6 +557,24 @@ class h2_transitions:
 		for i in xrange(self.n_lines):
 			labels.append(self.V.label[i] + ' ' + self.J.label[i])
 		return array(labels)
+	def intrinsic_ratio(self, line_label_1, line_label_2): #Return the intrinsic flux ratio of two transitions that arise from the same upper state
+		line_1 = self.label == line_label_1 #Find index to transition 1
+		line_2 = self.label == line_label_2 #Find index to transition 2
+		if (self.V.u[line_1] != self.V.u[line_2]) or (self.J.u[line_1] != self.J.u[line_2]): #Test if both transitions came from the upper state and catch error if not
+			print "ERROR: Both of these transitions do not arise from the same upper state."
+			return(0.0) #Return 0 if the transitions do not arise from the same upper state
+		ratio = (self.E.diff()[line_1] * self.A[line_1]) / (self.E.diff()[line_2] * self.A[line_2]) #Calculate intrinsic ratio of the two transitions
+		return(ratio) #return the intrinsic ratio
+	def flux_ratio(self, line_label_1, line_label_2, sigma=False): #Return flux ratio of any two lines
+		line_1 = self.label == line_label_1 #Find index to transition 1
+		line_2 = self.label == line_label_2 #Find index to transition 2
+		ratio = self.F[line_1] / self.F[line_2]
+		if sigma: #If user specifies they want the uncertainity returned, return the ratio, and the uncertainity
+			uncertainity = sqrt(ratio**2 * ((self.sigma[line_1]/self.F[line_1])**2 + (self.sigma[line_2]/self.F[line_2])**2) )
+			return ratio, uncertainity
+		else:
+			return self.F[line_1] / self.F[line_2]
+		return ratio #Return observed line flux ratio only (no uncertainity)
 	def upper_state(self, label, wave_range = [0,999999999.0]): #Given a label in spectroscopic notation, list transitions with same upper state (and a wavelength range if specified)
 		i = self.label == label
 		Ju = self.J.u[i]
@@ -517,19 +613,19 @@ class h2_transitions:
 		ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
    		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
    		show()
-   	def make_latex_table(self, output_filename, s2n_cut = 3.0): #Output a latex table of column densities for each H2 line
+   	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Output a latex table of column densities for each H2 line
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{lrrr}")
+   		lines.append(r"\begin{longtable}{lrrrrr}")
    		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
    		#lines.append("\begin{scriptsize}")
    		#lines.append(r"\begin{tabular}{cccc}")
-   		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny 1-0 S(1)}} \right)$ \\")
+  		lines.append(r"\hline")
+   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\log_{10} \left(N_i / N_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endfirsthead")
    		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line & $v_u$ & $J_u$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny 1-0 S(1)}} \right)$ \\")
+   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endhead")
    		lines.append(r"\hline")
@@ -544,10 +640,12 @@ class h2_transitions:
 	   			labels = self.label[i][s] #Grab line labels
 	   			J =  self.J.u[i][s] #Grab upper J
 	   			N = self.N[i][s] #Grab column density N
+	   			E = self.E.u[i][s]
+	   			A = self.A[i][s]
 	   			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
 	   			for j in xrange(len(labels)):
 					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
-					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & $" + "%1.2f" % log10(N[j]) 
+					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) + " & $" + "%1.2f" % log10(N[j]) 
 						+ r"^{+%1.2f" % (-log10(N[j]) + log10(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log10(N[j]) + log10(N[j]-sig_N[j])) +r"} $ \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
@@ -606,7 +704,7 @@ class h2_transitions:
 		fname = self.path + '_'+name+'.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True) #Plot model points as empty symbols
-			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, y_range=[-5,15], x_range=[0,60000])
 			xlim([0.,60000.])
 			pdf.savefig()
 			V = range(1,14)
@@ -616,13 +714,13 @@ class h2_transitions:
 			ratio.sigma = (self.sigma / self.N) * ratio.N
 			for i in V:
 				clf()
-				suptitle('v = '+str(i))
-				h2_model.v_plot(V=[i], orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True) #Plot model points as empty symbols
-				self.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+				title('v = '+str(i))
+				h2_model.v_plot(V=[i], orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True, ignore_x_range=True) #Plot model points as empty symbols
+				self.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, no_zero_x=True,y_range=[-5,15], x_range=[0,60000])
 				pdf.savefig()
 				clf()
-				suptitle('v = '+str(i) + ' residuals')
-				ratio.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False)
+				title('v = '+str(i) + ' residuals')
+				ratio.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, no_zero_x=True, y_range=[-5,15], x_range=[0,60000])
 				pdf.savefig()
    	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
@@ -630,7 +728,7 @@ class h2_transitions:
 			V = range(0,14)
 			for i in V:
 				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
-					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False, s2n_cut=s2n_cut)
+					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True)
 					pdf.savefig()
 	def plot_rot_temp_fit(self, s2n_cut = 3.0, V = range(0,14)): #Fit and plot rotation temperatures then show their residuals
 		fname = self.path + '_rotation_temperature_fits_and_residuals_all.pdf' #Set filename
@@ -646,13 +744,30 @@ class h2_transitions:
 			fname = self.path + '_rotation_temperature_residuals_V'+str(i)+'.pdf'
 			with PdfPages(fname) as pdf: #Make a pdf
 				title('V = '+str(i)+' residuals')
-				self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True, show_legend=False) #Plot residuals
+				self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, ignore_x_range=True, show_legend=False) #Plot residuals
 				pdf.savefig()
+	# WORK IN PROGRESS, NEED TO ALLOW FITTING OF VIBRATIONAL TEMPERATURES
+	# def plot_vib_temp_fit(self, s2n_cut = 3.0, V = range(0,14)): #Fit and plot rotation temperatures then show their residuals
+	# 	fname = self.path + '_rotation_temperature_fits_and_residuals_all.pdf' #Set filename
+	# 	with PdfPages(fname) as pdf: #Make a pdf
+	# 		self.v_plot(V=V, show_labels=False, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut)
+	# 		pdf.savefig()
+	# 	for i in V:
+	# 		fname = self.path + '_rotation_temperature_fits_V'+str(i)+'.pdf'
+	# 		with PdfPages(fname) as pdf: #Make a pdf
+	# 			title('V = '+str(i))
+	# 			self.v_plot(V=[i], show_labels=True, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True) #Plot single rotation ladder + rot temp fit
+	# 			pdf.savefig()
+	# 		fname = self.path + '_rotation_temperature_residuals_V'+str(i)+'.pdf'
+	# 		with PdfPages(fname) as pdf: #Make a pdf
+	# 			title('V = '+str(i)+' residuals')
+	# 			self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True, show_legend=False) #Plot residuals
+	# 			pdf.savefig()
    	#Make simple plot first showing all the different rotational ladders for a constant V
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp,
-   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True):
+   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -719,7 +834,12 @@ class h2_transitions:
 							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N[ortho])): #Loop through each point to label
-							text(self.T[ortho][j], log_N[ortho][j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
+								text(self.T[ortho][j], log_N[ortho][j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+					if label_J: #If user specifies labels for J
+						for j in xrange(len(log_N[ortho])): #Loop through each point to label
+							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
+								text(self.T[ortho][j], log_N[ortho][j], '    '+str(self.J.u[ortho][j]), fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with J upper level
 					#print 'For ortho v=', i
 					if rot_temp and len(log_N[ortho][isfinite(log_N[ortho])]) > 1: #If user specifies fit rotation temperature
 						#stop()
@@ -754,7 +874,12 @@ class h2_transitions:
 							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N[para])): #Loop through each point to label
-							text(self.T[para][j], log_N[para][j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
+								text(self.T[para][j], log_N[para][j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
+					if label_J: #If user specifies labels for J
+						for j in xrange(len(log_N[para])): #Loop through each point to label
+							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
+								text(self.T[para][j], log_N[para][j], '    '+str(self.J.u[para][j]), fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with J upper level
 					#print 'For para v=', i
 					if rot_temp and len(log_N[para][isfinite(log_N[para])]) > 1: #If user specifies fit rotation temperature
 						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N[para], y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
@@ -781,6 +906,8 @@ class h2_transitions:
 				elif any(self.T[self.s2n >= s2n_cut]) and no_zero_x: #If user does not want left side of x set to zero
 					goodpix = (self.s2n >= s2n_cut) & (self.V.u == V[0])
 					xlim([0.9*min(self.T[goodpix]), 1.1*max(self.T[goodpix])]) #Autoscale with left side of x not fixed at zero
+				elif ignore_x_range:
+					print '' #Do nothing, we are ignoring the xrange here
 				else: #If no points are acutally found just set the limit here.
 					xlim([0,70000.0])
 			else: #Else if user specifies range
@@ -1082,11 +1209,16 @@ def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, 
 
 #Object for storing column densities of individual levels, and performing calculations upon them
 class states:
-	def __init__(self):
+	def __init__(self, max_J=99):
 		ion() #Set up plotting to be interactive
 		show() #Open a plotting window
 		V, J = loadtxt(energy_table, usecols=(0,1), unpack=True, dtype='int', skiprows=1) #Read in data for H2 ground state rovibrational energy levels
 		E = loadtxt(energy_table, usecols=(2,), unpack=True, dtype='float', skiprows=1)
+		if max_J < 99:  #If user specifies a maximum J, use only states where J <= max_J
+			use_these_states = J <= max_J
+			V = V[use_these_states]
+			J = J[use_these_states]
+			E = E[use_these_states]
 		self.n_states = len(V) #Number of levels
 		self.V = V #Array to store vibration level
 		self.J = J #Array to store rotation level
@@ -1100,11 +1232,12 @@ class states:
 		self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
 		self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
 		for i in xrange(self.transitions.n_lines):
-			self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
-			self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
+			if self.transitions.J.u[i] <= max_J and self.transitions.J.l[i] <= max_J:
+				self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
+				self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
 		for i in xrange(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
-			transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i]) #Find transitions out of this state
-			transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i])
+			transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i])  #Find transitions out of this state
+			transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i]) 
 			self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
 			self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
 			self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
