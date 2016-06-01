@@ -95,6 +95,7 @@ def import_black_and_van_dishoeck(): #Read in line intensities for model 14 from
 	model = make_line_list() #Create object
 	model.read_model(labels, intensities) #Stick intenities into this line list object
 	model.calculate_column_density() #Calculate column densities from model 14
+	model.normalize()
 	return model #Return object
 
 #This defintion reads in the data from Takahashi & Uehara 2001 and creates an H2 transitions object storing the data, this is for comparing
@@ -403,7 +404,7 @@ def import_cloudy(): #Import cloudy model from cloudy directory
 #		h2_transitions.N[found_transitions] = N_over_g[i] #Set column density of transitions
 	h.calculate_column_density()
 	#h2_transitions.N = h2_transitions.N / h2_transitions.N[h2_transitions.label == '1-0 S(1)']
-	h.normalize() #Normalize to the 1-0 S(1) line
+	h.normalize() #Normalize to the 5-3 O(3) line
 	return(h)
 
 def import_emissivity(x_range=[4.25e17, 4.5e17], dr=5e15): #Import Cloudy model emmisivity adn integrate using given range
@@ -531,23 +532,27 @@ class h2_transitions:
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
 	def calculate_column_density(self, normalize=True): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
-		#self.N = self.F / (self.g * self.E.u * h * c * self.A)
-		#self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
-		self.N = self.F / (self.g * self.E.diff() * h * c * self.A)
-		self.Nsigma = self.sigma /  (self.g * self.E.diff() * h * c * self.A)
+		##self.N = self.F / (self.g * self.E.u * h * c * self.A)
+		##self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
+		#self.N = self.F / (self.g * self.E.diff() * h * c * self.A)
+		#self.Nsigma = self.sigma /  (self.g * self.E.diff() * h * c * self.A)
+		self.N = self.F / (self.E.diff() * h * c * self.A)
+		self.Nsigma = self.sigma /  (self.E.diff() * h * c * self.A)
 		if normalize: #By default normalize to the 1-0 S(1) line, set normalize = False if using absolute flux calibrated data
 			self.normalize()
 			#N_10_S1 = self.N[self.label == '1-0 S(1)'] #Grab column density derived from 1-0 S(1) line
 			#self.N = self.N / N_10_S1 #Normalize column densities
 			#self.Nsigma = self.Nsigma / N_10_S1 #Normalize uncertainity
 	def calculate_flux(self): #Calculate flux for a given calculated column density (ie. if you set it to thermalize)
-		self.F = self.N * self.g * self.E.diff() * h * c * self.A
+		#self.F = self.N * self.g * self.E.diff() * h * c * self.A
+		self.F = self.N * self.E.diff() * h * c * self.A
 	def normalize(self, label='5-3 O(3)'):
-		normalize_by_this = self.N[self.label == label]  #Grab column density of line to normalize by
+		i = self.label == label
+		normalize_by_this = self.N[i] / self.g[i]#Grab column density of line to normalize by
 		self.N /= normalize_by_this #Do the normalization
 		self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 	def thermalize(self, temperature): #Set all column densities to be thermalized at the specified temperature, normalized to the 1-0 S(1) line
-		exponential = exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
+		exponential = self.g * exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
 		self.N = boltzmann_distribution #Set column densities to the boltzmann distribution
 		self.normalize() #Normalize to the 1-0 S(1) line
@@ -616,16 +621,16 @@ class h2_transitions:
    	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Output a latex table of column densities for each H2 line
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{lrrrrr}")
+   		lines.append(r"\begin{longtable}{lrrrrrr}")
    		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
    		#lines.append("\begin{scriptsize}")
    		#lines.append(r"\begin{tabular}{cccc}")
   		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\log_{10} \left(N_i / N_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\lambda_{\mbox{\tiny vaccum}}$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endfirsthead")
    		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ &  $\log_{10} \left(N_i / N_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\lambda_{\mbox{\tiny vaccum}}$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endhead")
    		lines.append(r"\hline")
@@ -639,14 +644,15 @@ class h2_transitions:
 	   			s = argsort(self.J.u[i]) #Sort by upper J level
 	   			labels = self.label[i][s] #Grab line labels
 	   			J =  self.J.u[i][s] #Grab upper J
-	   			N = self.N[i][s] #Grab column density N
+	   			N = self.N[i][s] / self.g[i][s] #Grab column density N/g
 	   			E = self.E.u[i][s]
 	   			A = self.A[i][s]
-	   			sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
+	   			wave = self.wave[i][s]
+	   			sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 	   			for j in xrange(len(labels)):
 					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
-					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) + " & $" + "%1.2f" % log10(N[j]) 
-						+ r"^{+%1.2f" % (-log10(N[j]) + log10(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log10(N[j]) + log10(N[j]-sig_N[j])) +r"} $ \\") 
+					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) + " & " + r"%1.5f" % wave[j] +   " & $" + "%1.2f" % log(N[j]) 
+						+ r"^{+%1.2f" % (-log(N[j]) + log(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log(N[j]) + log(N[j]-sig_N[j])) +r"} $ \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
@@ -663,13 +669,13 @@ class h2_transitions:
 				s = argsort(self.J.u[i]) #Sort by upper J level
 				labels = self.label[i][s] #Grab line labels
 				J =  self.J.u[i][s] #Grab upper J
-				N = self.N[i][s] #Grab column density N\
+				N = self.N[i][s] / self.g[i][s] #Grab column density N\
 				E = self.E.u[i][s]
-				sig_N =  self.Nsigma[i][s] #Grab uncertainity in N
+				sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 				wave = self.wave[i][s] #Grab wavelength of line
 				for j in xrange(len(labels)): #Loop through each rotation ladder
 					lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
-						 '\t%1.3f'  % log10(N[j]) + '\t%1.3f' %  (-log10(N[j]) + log10(N[j]+sig_N[j])) + '\t%1.3f' % (-log10(N[j]) + log10(N[j]-sig_N[j])) )
+						 '\t%1.3f'  % log(N[j]) + '\t%1.3f' %  (-log(N[j]) + log(N[j]+sig_N[j])) + '\t%1.3f' % (-log(N[j]) + log(N[j]-sig_N[j])) )
 		savetxt(self.path + '_H2_column_densities.dat', lines, fmt="%s") #Output table
 	def fit_rot_temp(self, T, log_N, y_error_bars, s2n_cut = 1., color='black', dotted_line=False, rot_temp_energy_limit=0., show=True): #Fit rotation temperature to a given ladder in vibration
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
@@ -700,28 +706,63 @@ class h2_transitions:
 		residuals = e**(log_N-y)
 		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-	def compare_model(self, h2_model, name='compare_model_excitation_diagrams'): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data
+	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[21.0,15], x_range=[0.0,55000.0], y_range=array([-5.25,15.25])): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
 		fname = self.path + '_'+name+'.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
-			h2_model.v_plot(orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True) #Plot model points as empty symbols
-			self.v_plot(orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, y_range=[-5,15], x_range=[0,60000])
-			xlim([0.,60000.])
-			pdf.savefig()
-			V = range(1,14)
-			y_range = [nanmin(log10(self.N)), nanmax(log10(self.N))]
 			ratio = copy.deepcopy(self)
 			ratio.N = (self.N / h2_model.N)
-			ratio.sigma = (self.sigma / self.N) * ratio.N
-			for i in V:
-				clf()
-				title('v = '+str(i))
-				h2_model.v_plot(V=[i], orthopara_fill=False, empty_fill=True, clear=True, show_legend=False, savepdf=False, show_labels=False, line=True, ignore_x_range=True) #Plot model points as empty symbols
-				self.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, no_zero_x=True,y_range=[-5,15], x_range=[0,60000])
-				pdf.savefig()
-				clf()
-				title('v = '+str(i) + ' residuals')
-				ratio.v_plot(V=[i], orthopara_fill=False, full_fill=True, clear=False, show_legend=False, savepdf=False, no_zero_x=True, y_range=[-5,15], x_range=[0,60000])
-				pdf.savefig()
+			ratio.Nsigma = (self.Nsigma /h2_model.N)
+			### Set up subplotting
+			subplots(2, sharex="col") #Set all plots to share the same x axis
+			tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
+			fig = gcf()#Adjust aspect ratio
+			fig.set_size_inches(figsize) #Adjust aspect ratio
+			subplots_adjust(hspace=0, wspace=0) #Set all plots to have no space between them vertically
+			gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
+			### Left side
+			subplot(gs[0])
+			h2_model.v_plot(orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
+			self.v_plot(orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
+			ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+			V = range(1,14)
+			frame = gca() #Turn off axis number labels
+			setp(frame.get_xticklabels(), visible=False)
+			#subplot(gs[3])
+			subplot(gs[1])
+			ratio.v_plot(orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
+			ylabel("Column Density Ratio of Data to Model   ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)]", fontsize=18)
+			xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+			pdf.savefig()
+			### Middle
+			# V=[1,3,5,7,9,11,13]
+			# subplot(gs[1])
+			# h2_model.v_plot(V=V, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_xticklabels(), visible=False)
+			# setp(frame.get_yticklabels(), visible=False)
+			# subplot(gs[4])
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_yticklabels(), visible=False)
+			# ratio.v_plot(V=V, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
+			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+			# ### Right side
+			# V=[0,2,4,6,8,10,12,14]
+			# subplot(gs[2])
+			# h2_model.v_plot(V=V, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_xticklabels(), visible=False)
+			# setp(frame.get_yticklabels(), visible=False)
+			# subplot(gs[5])
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_yticklabels(), visible=False)
+			# ratio.v_plot(V=V, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
+			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+			# pdf.savefig()
+
+
+			# 	pdf.savefig()
    	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -730,22 +771,76 @@ class h2_transitions:
 				if any((self.V.u == i) & isfinite(self.N) & (self.N > 0.0)):
 					self.v_plot(V=[i], show_upper_limits=False, show_labels=True, rot_temp=False, show_legend=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True)
 					pdf.savefig()
-	def plot_rot_temp_fit(self, s2n_cut = 3.0, V = range(0,14)): #Fit and plot rotation temperatures then show their residuals
+	def plot_rot_temp_fit(self, s2n_cut = 3.0, figsize=[21.0,15], x_range=[0.0,55000.0], y_range=array([-5.25,15.25])): #Fit and plot rotation temperatures then show their residuals
 		fname = self.path + '_rotation_temperature_fits_and_residuals_all.pdf' #Set filename
 		with PdfPages(fname) as pdf: #Make a pdf
-			self.v_plot(V=V, show_labels=False, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut)
+			### Set up subplotting
+			subplots(2, sharex="col") #Set all plots to share the same x axis
+			tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
+			fig = gcf()#Adjust aspect ratio
+			fig.set_size_inches(figsize) #Adjust aspect ratio
+			subplots_adjust(hspace=0, wspace=0) #Set all plots to have no space between them vertically
+			gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
+			### Left side
+			subplot(gs[0])
+			V = range(1,15)
+			self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+					rot_temp=True, rot_temp_residuals=False, s2n_cut=s2n_cut)
+			ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+			frame = gca() #Turn off axis number labels
+			setp(frame.get_xticklabels(), visible=False)
+			#subplot(gs[3])
+			subplot(gs[1])
+			self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+					rot_temp=False, rot_temp_residuals=True, s2n_cut=s2n_cut)
+			ylabel("Column Density Ratio of Data to Model   ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)]", fontsize=18)
+			xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
 			pdf.savefig()
-		for i in V:
-			fname = self.path + '_rotation_temperature_fits_V'+str(i)+'.pdf'
-			with PdfPages(fname) as pdf: #Make a pdf
-				title('V = '+str(i))
-				self.v_plot(V=[i], show_labels=True, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True) #Plot single rotation ladder + rot temp fit
-				pdf.savefig()
-			fname = self.path + '_rotation_temperature_residuals_V'+str(i)+'.pdf'
-			with PdfPages(fname) as pdf: #Make a pdf
-				title('V = '+str(i)+' residuals')
-				self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, ignore_x_range=True, show_legend=False) #Plot residuals
-				pdf.savefig()
+			### Middle
+			# V=[1,3,5,7,9,11,13]
+			# subplot(gs[1])
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+			# 		rot_temp=True, rot_temp_residuals=False, s2n_cut=s2n_cut)			
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_xticklabels(), visible=False)
+			# setp(frame.get_yticklabels(), visible=False)
+			# subplot(gs[4])
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_yticklabels(), visible=False)
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+			# 		rot_temp=False, rot_temp_residuals=True, s2n_cut=s2n_cut)
+			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+			# ### Right side
+			# V=[0,2,4,6,8,10,12,14]
+			# subplot(gs[2])
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+			# 		rot_temp=True, rot_temp_residuals=False, s2n_cut=s2n_cut)			
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_xticklabels(), visible=False)
+			# setp(frame.get_yticklabels(), visible=False)
+			# subplot(gs[5])
+			# frame = gca() #Turn off axis number labels
+			# setp(frame.get_yticklabels(), visible=False)
+			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+			# 		rot_temp=False, rot_temp_residuals=True, s2n_cut=s2n_cut)
+			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+			#pdf.savefig()
+
+		#OLD VERSION
+		# with PdfPages(fname) as pdf: #Make a pdf
+		# 	self.v_plot(V=V, show_labels=False, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut)
+		# 	pdf.savefig()
+		# for i in V:
+		# 	fname = self.path + '_rotation_temperature_fits_V'+str(i)+'.pdf'
+		# 	with PdfPages(fname) as pdf: #Make a pdf
+		# 		title('V = '+str(i))
+		# 		self.v_plot(V=[i], show_labels=True, rot_temp=True, rot_temp_residuals=False, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True) #Plot single rotation ladder + rot temp fit
+		# 		pdf.savefig()
+		# 	fname = self.path + '_rotation_temperature_residuals_V'+str(i)+'.pdf'
+		# 	with PdfPages(fname) as pdf: #Make a pdf
+		# 		title('V = '+str(i)+' residuals')
+		# 		self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, ignore_x_range=True, show_legend=False) #Plot residuals
+		# 		pdf.savefig()
 	# WORK IN PROGRESS, NEED TO ALLOW FITTING OF VIBRATIONAL TEMPERATURES
 	# def plot_vib_temp_fit(self, s2n_cut = 3.0, V = range(0,14)): #Fit and plot rotation temperatures then show their residuals
 	# 	fname = self.path + '_rotation_temperature_fits_and_residuals_all.pdf' #Set filename
@@ -766,7 +861,7 @@ class h2_transitions:
    	#Make simple plot first showing all the different rotational ladders for a constant V
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
-   		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp,
+   		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
    		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
@@ -793,20 +888,20 @@ class h2_transitions:
 				x = arange(0,200000, 10) #Set up an ax axis 
 				interp_single_temp = interp1d(x, single_temp_y_intercept - (x / single_temp), kind='linear') #create interpolation object for the single temperature
 				data_single_temp = interp_single_temp(self.T) #Create array of the single temperature for subtraction from the column density later on
-				log_N = log(self.N) - data_single_temp #Log of the column density
-				plus_one_sigma = abs(log_N  + data_single_temp - log(self.N + self.Nsigma))
-				minus_one_sigma = abs(log_N + data_single_temp - log(self.N - self.Nsigma))
-				upper_limits = log(self.Nsigma*3.0) - data_single_temp
+				log_N = log(self.N/self.g) - data_single_temp #Log of the column density
+				plus_one_sigma = abs(log_N  + data_single_temp - log((self.N + self.Nsigma)/self.g) )
+				minus_one_sigma = abs(log_N + data_single_temp - log((self.N + self.Nsigma)/self.g) )
+				upper_limits = log(self.Nsigma*3.0/self.g) - data_single_temp
 			elif rot_temp_residuals: #If user has previously calculated rotation temperatures for each ladder, here they can show the residuals after subtracting the linear fits 
 				log_N = log(self.res_rot_T)
-				plus_one_sigma = abs(log_N  - log(self.res_rot_T + self.Nsigma))
-				minus_one_sigma = abs(log_N - log(self.res_rot_T - self.Nsigma))
-				upper_limits = log(self.Nsigma*3.0)
+				plus_one_sigma = abs(log_N  - log(self.res_rot_T + (self.Nsigma/self.g)))
+				minus_one_sigma = abs(log_N - log(self.res_rot_T - (self.Nsigma/self.g)))
+				upper_limits = log(self.Nsigma*3.0/self.g)
 			else: #Default to simply plotting the column densities and their error bars
-				log_N = log(self.N) #Log of the column density
-				plus_one_sigma = abs(log_N  - log(self.N + self.Nsigma))
-				minus_one_sigma = abs(log_N - log(self.N - self.Nsigma))
-				upper_limits = log(self.Nsigma*3.0)
+				log_N = log(self.N/self.g) #Log of the column density
+				plus_one_sigma = abs(log_N  - log((self.N + self.Nsigma)/self.g) )
+				minus_one_sigma = abs(log_N - log((self.N - self.Nsigma)/self.g) )
+				upper_limits = log(self.Nsigma*3.0/self.g)
 			#plus_one_sigma = abs(log_N - data_single_temp - log(self.N - exp(data_single_temp) + self.Nsigma)) #Upper 1 sigma errors in log space
 			#minus_one_sigma = abs(log_N - data_single_temp  - log(self.N - exp(data_single_temp) - self.Nsigma)) #Lower 1 sigma errors in log space
 			for i in use_upper_v_states:
@@ -821,7 +916,11 @@ class h2_transitions:
 					current_symbol = '-'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
 				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
+					if no_legend_label:
+						use_label = '_nolegend_'
+					else:
+						use_label = ' '
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
@@ -860,7 +959,11 @@ class h2_transitions:
 					current_symbol = ':'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
 				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
+					if no_legend_label: #Check if user wants to use legend labes, if not ignore the label
+						use_label = '_nolegend_'
+					else:
+						use_label = 'v='+str(i)
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
@@ -891,14 +994,14 @@ class h2_transitions:
 						self.rot_T[para] = 0 #Save rotation temperature for individual lines
 						self.sig_rot_T[para] = 0 #Save rotation tempreature uncertainity for individual lines
 						self.res_rot_T[para] = ones(len(log_N[para])) #Save residuals for individual data points from the rotation tmeperature fit
-						self.sig_res_rot_T[para] = self.Nsigma[para] #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)						
+						self.sig_res_rot_T[para] = self.Nsigma[para]/self.g[para] #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)						
 			tick_params(labelsize=14) #Set tick mark label size
 			if show_axis_labels: #By default print the axis labels, but the user can turn these off if so desired (replacing them with custom labels if needed)
 				if normalize: #If normalizing to the 1-0 S(1) line
-					ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+					ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
 				else:  #If using absolute flux calibrated data
-					ylabel("Column Density   ln(N/g) [cm$^{-2}$]", fontsize=labelsize)
-				xlabel("Excitation Energy     (E$_i$/k)     [K]", fontsize=labelsize, labelpad=4)
+					ylabel("Column Density   ln(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
+				xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
 				if any(self.T[self.s2n >= s2n_cut]) and not no_zero_x: #Catch error
 					goodpix = (self.s2n >= s2n_cut) 
@@ -960,14 +1063,14 @@ class h2_transitions:
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
-					log_N = log(self.N[ortho]) #Log of the column density
+					log_N = log(self.N[ortho]/self.g[ortho]) #Log of the column density
 					if nansum(self.s2n[ortho]) == 0.:
 						plot(self.J.u[ortho], log_N, current_symbol,  color=current_color, label=' ', markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
-						y_error_bars = [abs(log_N - log(self.N[ortho]-self.Nsigma[ortho])), abs(log_N - log(self.N[ortho]+self.Nsigma[ortho]))] #Calculate upper and lower ends on error bars
+						y_error_bars = [abs(log_N - log((self.N[ortho]-self.Nsigma[ortho])/self.g[ortho])), abs(log_N - log((self.N[ortho]-self.Nsigma[ortho])/self.g[ortho]))] #Calculate upper and lower ends on error bars
 						errorbar(self.J.u[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.J.u[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.J.u[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0/self.g[ortho_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
@@ -985,14 +1088,14 @@ class h2_transitions:
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
-					log_N = log(self.N[para]) #Log of the column density
+					log_N = log(self.N[para]/self.g[para]) #Log of the column density
 					if nansum(self.s2n[para]) == 0.:
 						plot(self.J.u[para], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
-						y_error_bars = [abs(log_N - log(self.N[para]-self.Nsigma[para])), abs(log_N - log(self.N[para]+self.Nsigma[para]))] #Calculate upper and lower ends on error bars
+						y_error_bars = [abs(log_N - log((self.N[para]-self.Nsigma[para])/self.g[para])), abs(log_N - log((self.N[para]-self.Nsigma[para])/self.g[para]))] #Calculate upper and lower ends on error bars
 						errorbar(self.J.u[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.J.u[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.J.u[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0/self.g[para_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
@@ -1001,9 +1104,9 @@ class h2_transitions:
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 			tick_params(labelsize=14) #Set tick mark label size
 			if normalize: #If normalizing to the 1-0 S(1) line
-				ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+				ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
 			else:  #If using absolute flux calibrated data
-				ylabel("Column Density   pn(N/g) [cm$^{-2}$]", fontsize=labelsize)
+				ylabel("Column Density   pn(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
 			xlabel("Upper Rotation State J$_u$", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
 				xlim([0,1.4*max(self.J.u[self.s2n >= s2n_cut])]) #Autoscale
@@ -1046,14 +1149,14 @@ class h2_transitions:
 				found = (self.J.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				upperlimit =  (self.J.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(found): #If datapoints are found...
-					log_N = log(self.N[found]) #Log of the column density
+					log_N = log(self.N[found]/self.g[found]) #Log of the column density
 					if nansum(self.s2n[found]) == 0.:
 						plot(self.V.u[found], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=fill)  #Plot data + error bars
 					else:
-						y_error_bars = [abs(log_N - log(self.N[found]-self.Nsigma[found])), abs(log_N - log(self.N[found]+self.Nsigma[found]))] #Calculate upper and lower ends on error bars
+						y_error_bars = [abs(log_N - log((self.N[found]-self.Nsigma[found])/self.g[found]) ), abs(log_N - log((self.N[found]-self.Nsigma[found])/self.g[found]) )] #Calculate upper and lower ends on error bars
 						errorbar(self.V.u[found], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='J='+str(i), capthick=3, markersize=symbsize, fillstyle=fill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.V.u[upperlimit], log(self.Nsigma[upperlimit]*3.0), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=fill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.V.u[upperlimit], log(self.Nsigma[upperlimit]*3.0/self.g[upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=fill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.V.u[found][j], log_N[j], '        '+self.label[found][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
@@ -1061,9 +1164,9 @@ class h2_transitions:
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='J='+str(i), capthick=3, markersize=symbsize, fillstyle=fill)  #Do empty plot to fill legend
 			tick_params(labelsize=14) #Set tick mark label size
 			if normalize: #If normalizing to the 1-0 S(1) line
-				ylabel("Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+				ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
 			else:  #If using absolute flux calibrated data
-				ylabel("Column Density   pn(N/g) [cm$^{-2}$]", fontsize=labelsize)
+				ylabel("Column Density   ln(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
 			xlabel("Upper Vibration State v$_u$", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
 				xlim([0,1.4*max(self.J.u[self.s2n >= s2n_cut])]) #Autoscale
@@ -1087,7 +1190,7 @@ class h2_transitions:
 		#elif wireframe:
 		#	ax.plot_wireframe(self.V.u[i], self.J.u[i], log(self.N[i]), rstride=2, cstride=2, cmap=cm.jet)
 		else: #Else plot as a scatter plot
-			ax.scatter(self.V.u[i], self.J.u[i], log(self.N[i]))
+			ax.scatter(self.V.u[i], self.J.u[i], log(self.N[i]/self.g[i]))
 		for more_surfaces in extra: #Plot more H2 surfaces (ie. models or thermalized populations)
 			i = (more_surfaces.N > 0.) 
 			ax.plot_trisurf(more_surfaces.V.u[i], more_surfaces.J.u[i], log(more_surfaces.N[i]), cmap=cm.jet, alpha=0.3)
@@ -1182,7 +1285,7 @@ class E:
 
 
 @jit
-def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, distribution, collisions=True): #Speed up radiative cascade with numba
+def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, distribution, collisions=True, scale_factor=1e-10): #Speed up radiative cascade with numba
 	transition_amount = trans_A*time
 	para = J%1==0
 	ortho = J%1==1
@@ -1193,16 +1296,20 @@ def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, 
 	for k in xrange(iterations): #loop through however many iterations user specifies
 		store_delta_N = zeros(n_states)  #Set up array to store all the changes in N 
 		for i in xrange(n_lines):
-			delta_N = N[upper_states[i]]*transition_amount[i]
+			delta_N = N[upper_states[i]]*transition_amount[i] 
 			store_delta_N[upper_states[i]] -= delta_N
 			store_delta_N[lower_states[i]] += delta_N
 		N += store_delta_N #Modfiy level populations after the effects of all the transitions have been summed up
 		if collisions: #If user specifies to use collisions
 			N -= 0.01*N*time*V  #Apply this very crude approximation of collisional de-excitation, which favors high V
-	 	N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
-	 	N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
-	 	N[ground_J0] = 0.
-	 	N[ground_J1] = 0.
+	 	#N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
+	 	#N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
+	 	#N += distribution * scale_factor*time
+	 	if scale_factor > 0.:
+	 		N[para] += scale_factor*distribution[para]#*N[ground_J0] #+ 0.5*(1.0-sum(N)))
+			N[ortho] += scale_factor*distribution[ortho]#*N[ground_J1] #+ 0.5*(1.0-sum(N)))	
+		 	N[ground_J0] = 0.
+		 	N[ground_J1] = 0.
 	return N
 
 
@@ -1224,6 +1331,8 @@ class states:
 		self.J = J #Array to store rotation level
 		self.T = E / k #Excited energy above the ground rovibrational state in units of Kelvin
 		self.N = zeros(self.n_states) #Array for storing column densities
+		g_ortho_para = 1 + 2 * (J % 2 == 1) #Calculate the degenearcy for ortho or para hydrogen
+		self.g = g_ortho_para * (2*J+1) #Store degeneracy
 		self.tau = zeros(self.n_states) #array for storing radiative lifetime
 		self.Q = zeros(self.n_states)
 		self.A_tot_in = zeros(self.n_states)
@@ -1244,7 +1353,7 @@ class states:
 			self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state]) 
 		self.test_n = self.Q * self.tau
 		self.start_cascade = False #Flag if cascade has started or not
-		self.convergence = [] #Set up python list that will hold convergence of cascade
+		#self.convergence = [] #Set up python list that will hold convergence of cascade
 		#UV pumping from Black & Dalgarno (1976) 
 		self.BD76_cloud_boundary_pumping = array([1.78e-11, 1.32e-11, 1.32e-11, 8.88e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
 		 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.1e-11, 7.77e-12, 7.81e-12, 5.1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
@@ -1271,10 +1380,11 @@ class states:
 		#self.BD76_cloud_center_pumping = 
 	def total_N(self): #Grab total column density N and return it
 		return nansum(self.N) #Return total column density of H2
-	def cascade(self, time=1.0, temp=25000.0, quick=0, showplot=True, iterations=1): #Do a step in the radiative cascade
+	def cascade(self, time=1.0, temp=250.0, quick=0, showplot=True, iterations=1, scale_factor=1e-10, collisions=False): #Do a step in the radiative cascade
 		V = self.V #Assign variables to speed up loop
 		J = self.J
 		N = self.N
+		g = self.g
 		#trans_V_u = self.transitions.V.u
 		#trans_V_l = self.transitions.V.l
 		#trans_J_u = self.transitions.J.u
@@ -1286,30 +1396,36 @@ class states:
 		#	maxthresh = -partsort(-trans_A,quick)[quick-1] #Find threshold for maximum
 		#else:
 		#	maxthresh = 0. #E
-		exponential = exp(-self.T/temp) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
+		exponential = g * exp(-self.T/temp) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltmann_distribution = exponential / nansum(exponential)
 		ground_J1 = (J==1) & (V==0)
 		ground_J0 = (J==0) & (V==0)
 		if not self.start_cascade: #If cascade has not started yet 
-			#N = boltmann_distribution #preset the population to be the boltzmann distribution
+			N = zeros(self.n_states) #Start off with everything  = 0.0
+			pure_rotation_states = V == 0
+			const = 1e-3 #Fraction to populate other states at v > 0 to match the J levels of v=0
+			N[pure_rotation_states] = boltmann_distribution[pure_rotation_states] #preset the population to be the boltzmann distribution for only the pure rotation states
+			for current_J in J[pure_rotation_states]: #loop through each possible rotation state
+				other_vibrational_states_with_same_J = (J==current_J) & (~pure_rotation_states) #Find states at higher V with same J
+				if any(other_vibrational_states_with_same_J): #If any J states in v>0 matches the current J
+					N[other_vibrational_states_with_same_J] = const * N[pure_rotation_states & (J==current_J)] #Set level populations
 			#N = (1.-(J/10.)) + (1.-(V/14.0)) #Set populations based on V and J
-			N = zeros(self.n_states)
 			#N[(V==14) & (J==1)] = 1.0
 			#N = self.BD76_formation_pumping
 			#N = self.BD76_cloud_boundary_pumping
 			#N = exp(-(0.5*(J+1)+0.3*(V+1)))
-	 		N[V>-1] = exp(-(0.25*(J[V>-1]-1)+0.2*(V[V>-1]-1)))
-	 		N[ground_J0] = 0.
-	 		N[ground_J1] = 0.
+	 		#N[V>-1] = exp(-(0.25*(J[V>-1]-1)+0.2*(V[V>-1]-1)))
+	 		#N[ground_J0] = 0.
+	 		#N[ground_J1] = 0.
 			#N = exp(-J.astype(float)-V.astype(float))
 			#N = ones(self.n_states)
-			#N[V==0] == 0.
+			N[V==0] == 0.
 			N = N/sum(N) #Normalize
 			self.distribution = copy.deepcopy(N)
 			self.start_cascade = True #Then flip the flag so that the populations stay as they are
 		old_N = copy.deepcopy(self.N)
 
-		N = run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, self.distribution, collisions=False) #Test cascade with numba
+		N = run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, self.distribution, collisions=collisions, scale_factor=scale_factor) #Test cascade with numba
 		# transition_amount = trans_A*time
 		# para = J%1==0
 		# ortho = J%1==1
@@ -1362,9 +1478,9 @@ class states:
 	 		
  		#N[285] = N[285] + N[0] #Test just dumping everything into the final level and let everything cascade out of it.
  		#N[0]  = 0.0 #Empty out ground state after redistributing all the molecules in the ground
- 		convergence_measurement = (nansum((N-old_N)))**2
- 		print 'convergence = ', convergence_measurement
- 		self.convergence.append(convergence_measurement)#Calculate convergence from one step to the 
+ 		#convergence_measurement = (nansum((N-old_N)))**2
+ 		#print 'convergence = ', convergence_measurement
+ 		#self.convergence.append(convergence_measurement)#Calculate convergence from one step to the 
  		self.N = N
  		if showplot:
  			self.set_transition_column_densities()

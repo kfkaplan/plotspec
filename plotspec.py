@@ -198,7 +198,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 			pdf.savefig()  #Save showing synthetic A0V spectrum that the data will be divided by to do relative flux calibration & telluric correction on second page of PDF
 			for i in xrange(std.n_orders): #Loop through and plot each order for the observed A0V, along with the corrected H I absorption to see how well the synthetic A0V spectrum fits
 				if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-					std.orders[i].flux[std_flattened.orders[i].flux <= .05] = nan #Mask out bad pixels
+					std.orders[i].flux[std_flattened.orders[i].flux <= .1] = nan #Mask out bad pixels
 				waves = std.orders[i].wave #Std wavelengths
 				std_flux = std.orders[i].flux #Std flux
 				if telluric_spectrum == []: #If user does not specifiy a telluric spectrum directly
@@ -266,9 +266,11 @@ class position_velocity:
 			shift_labels = loadtxt(shift_lines, usecols=[0,], dtype=str, delimiter='\t') #Load line labels to ID each line
 			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
 			for i in xrange(len(shift_labels)): #Go through each line and shift it's wavlength
-				find_line = where(show_lines.label == shift_labels[i])[0][0] #Find matching line to shift
-				show_lines.wave[find_line] = show_lines.wave[find_line] * (-(shift_v[i]/c)+1.0)#Artifically doppler shift the line
-				print shift_labels[i]
+				#find_line = where(show_lines.label == shift_labels[i])[0][0] #Find matching line to shift
+				find_line = show_lines.label == shift_labels[i]
+				if any(find_line): #Only run if a line is found
+					show_lines.wave[find_line] = show_lines.wave[find_line] * (-(shift_v[i]/c)+1.0)#Artifically doppler shift the line
+				#print shift_labels[i]
 				#stop()
 		
 		for i in xrange(n_lines): #Label the lines
@@ -665,10 +667,10 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		self.flux = line_flux #Save line fluxes
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
-		if not optimal_extraction: #If user uses masked equal weighted extraction save the following....
+		if s2n_mask: #If user uses masked equal weighted extraction save the following....
 			self.mask_contours = mask_contours #store mask contours for later inspection or plotting if needed (for making advnaced 2D figures in papers)
 			self.mask_shift = mask_shift #Store mask shift (in pixels) to later recall what the S/N maximization routine found
-		else: #else if the user uses optimal extraction save the following
+		elif optimal_extraction: #else if the user uses optimal extraction save the following
 			self.weights = weights #Store weights used in extraction
 			self.rolled_weights = rolled_weights #Store pixel shifts in weights used for extractionx
 			self.mask_shift = mask_shift
@@ -815,7 +817,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
 def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
-		twodim=True, usestd=True, no_flux=False, make_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
+		twodim=True, usestd=True, no_flux=False, make_1d=False, median_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
 		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False):
 	if usestd:
 		#Make 1D spectrum object for standard star
@@ -849,6 +851,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		if make_1d: #If user specifies they want to make a 1D spectrum, we will overwrite the spec1d
 			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nansum(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
+				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
+		elif median_1d: #If user specifies they want to make a 1D spectrum by median collapsing, overwrite the old spec1d, for now we calculate uncertainity by summing variance
+			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
+				sci1d_obj.orders[i].flux = nanmedian(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
 				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
 	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
 	if oh != 0: #If user specifies a sky correction image number
@@ -934,7 +940,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 def makespec(date, band, waveno, frameno, std=False, twodim=False, mask_cosmics=False):
 	#spec_data = fits_file(date, frameno, band, std=std, twodim=twodim, s2n=s2n) #Read in data from spectrum
 	spec_data = fits_file(date, frameno, band, std=std, twodim=twodim)
-	wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
+	try: #Try reading in new wavelength data from A0V
+		wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
+	except: #If it does not exist, try reading in wavelength data the old way (from the calib directory)
+		wave_data = fits_file(date, waveno, band, wave_old=True) #If 1D, read in data from wavelength solution
 	if twodim: #If spectrum is 2D but no variance data to be read in
 		var_data = fits_file(date, frameno, band, var2d=True) #Grab data for 2D variance cube
 		spec_obj = spec2d(wave_data, spec_data, fits_var=var_data, mask_cosmics=mask_cosmics) #Create 2D spectrum object, with variance data inputted to get S/N
@@ -947,12 +956,13 @@ def makespec(date, band, waveno, frameno, std=False, twodim=False, mask_cosmics=
 
 #Class stores information about a fits file that has been reduced by the PLP
 class fits_file:
-	def __init__(self, date, frameno, band, std=False, wave=False, twodim=False, s2n=False, var1d=False, var2d=False):
+	def __init__(self, date, frameno, band, std=False, wave=False, twodim=False, s2n=False, var1d=False, var2d=False, wave_old=False):
 		self.date = '%.4d' % int(date) #Store date of observation
 		self.frameno =  '%.4d' % int(frameno) #Store first frame number of observation
 		self.band = band #Store band name 'H' or 'K'
 		self.std = std #Store if file is a standard star
 		self.wave = wave #Store if file is a wavelength solution
+		self.wave_old = wave_old #Store if file is the old way wavelength solutions are done
 		self.s2n = s2n #Store if file is the S/N spectrum
 		self.twodim = twodim #Store if file is of a 2D spectrum instead of a 1D spectrum
 		self.var1d = var1d
@@ -970,7 +980,13 @@ class fits_file:
 			postfix = '.spec_flattened.fits'
 			master_path = data_path
 		elif self.wave: #If file is the 1D wavelength calibration
-			prefix = 'SKY_' + prefix
+			#prefix = 'SKY_' + prefix  #Old version reads in arclamp or sky wavelength calibraiton
+			#postfix = '.wvlsol_v1.fits'
+			#master_path = calib_path
+			postfix = '.wave.fits' #New version reads in A0V telluric wavelength solution
+			master_path = data_path
+		elif self.wave_old: #This is the old way wavelength soultions were read in, use it if the new way doesn't work
+			prefix = 'SKY_' + prefix  #Old version reads in arclamp or sky wavelength calibraiton
 			postfix = '.wvlsol_v1.fits'
 			master_path = calib_path
 		elif self.twodim:  #If file is the 2D spectrum
@@ -990,7 +1006,10 @@ class fits_file:
 			master_path = data_path
 		return master_path + self.date +'/' + prefix + postfix #Return full path for fits file 
 	def get(self):  #Get fits file data with an easy to call definition
-		return self.data
+		if self.wave:  #If wavelength file, the wavelenghts are stored in nanometers, so we must convert them to um
+			return self.data / 1e3
+		else: #Else just return what was storted in the FITS file without modifying the data
+			return self.data
 
 #Class to store and analyze a 1D spectrumc
 class spec1d:
@@ -1283,7 +1302,15 @@ class spec2d:
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
 	#This function applies continuum and background subtraction to one order
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False):
+	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], linear_fit=False, mask_outliers=False):
+		if linear_fit: #WARNING EXPERIMENTAL, If a linear fit, initialize the polynomial fitting routines
+			p_init = models.Polynomial1D(degree=2)
+			fit_p = fitting.SimplexLSQFitter()
+			N = 16 #Divide the order into N segments and calculate the tace along each
+			set_size = 2048 / N #Size of each segment to find median of
+			median_set = zeros([N, self.slit_pixel_length]) #Initialize variable to hold the median set
+			x_for_median_set = arange(0, 2048, set_size) + (set_size/2) #Calculate x pixels for the linear fit for the continuum
+			x = arange(2048)
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			#print 'order = ', i, 'number of dimensions = ', num_dimensions
 			old_order =  copy.deepcopy(order)
@@ -1294,18 +1321,33 @@ class spec2d:
 			trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
 			max_y = where(trace == flat_nanmax(trace))[0][0] #Find peak of trace
 			norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
-			if use_poly: #If user wants to use polynomial along the x direction
-				p_init = models.Polynomial1D(degree=4)
-				fit_p = fitting.SimplexLSQFitter()
-				nx = len(old_order.flux[0,:])
-				ny = len(old_order.flux[:,0])
-			 	x = arange(nx)
-			 	result_2d = zeros([ny,nx])
-			 	for row in xrange(ny):
-			 		if any(isfinite(old_order.flux[row,:])):
-						#stop()
-						p =  fit_p(p_init, x, old_order.flux[row,:])
-				 		result_2d[row,:] = p(x)
+			if mask_outliers: #mask columns that deviate significantly from the median continuum trace (ie. emission lines, cosmics, ect.), if the user so desires
+				normalize_order_by_column = old_order.flux  / expand_dims(nanmedian(old_order.flux, axis=0), axis=0) #Normalize each column
+				divide_normalized_order_by_trace = normalize_order_by_column / expand_dims(norm_trace, axis=1) #Divide the normalized columns by the normalized trace
+				deviant_pixels = abs(divide_normalized_order_by_trace) > 20.0 #Find pixels that significantly deviate from the trace, this would be anything from emission lines to high noise
+				find_deviant_columns = sum(deviant_pixels, axis=0) > 10 #Find columns with only a few deviant pixels
+				old_order.flux[:, find_deviant_columns] = nan #Mask out deviant pixels
+				#trace_order = ones([61,2048])*expand_dims(trace, axis = 1)
+				#flatten_order_by_trace = old_order.flux / trace_order
+				#set_each_column_to_be_unity = flatten_order_by_trace / nanmedian(flatten_order_by_trace, axis=0)
+			if linear_fit: ##WARNING EXPERIMENTAL, If user wants to use a line fit of the trace along the x direction
+				for i in xrange(N): #Loop through each segment
+					median_set[i,:] = nanmedian(old_order.flux[:,set_size*i: set_size*(i+1)-1], axis=1) #Find trace of this single segment
+				normalized_median_set = nanmax(median_set, axis=1) #Normalize the median sets by the trace and then collapse result along slit
+				finite_pixels = isfinite(normalized_median_set)
+				p = fit_p(p_init, x_for_median_set[finite_pixels], normalized_median_set[finite_pixels])
+				result_2d = p(x) * expand_dims(trace, axis=1)
+				# p_init = models.Polynomial1D(degree=4)
+				# fit_p = fitting.SimplexLSQFitter()
+				# nx = len(old_order.flux[0,:])
+				# ny = len(old_order.flux[:,0])
+			 # 	x = arange(nx)
+			 # 	result_2d = zeros([ny,nx])
+			 # 	for row in xrange(ny):
+			 # 		if any(isfinite(old_order.flux[row,:])):
+				# 		#stop()
+				# 		p =  fit_p(p_init, x, old_order.flux[row,:])
+				#  		result_2d[row,:] = p(x)
 				subtracted_flux = order.flux - result_2d
 			else: #If user wants to use running median filter
 				median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
