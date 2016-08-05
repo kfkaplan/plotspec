@@ -134,6 +134,15 @@ def read_takahashi_uehara_2001_model():
 		C_B.N[same_upper_level] = C_B.N[match]
 	return(ice_A, ice_B, Si_A, Si_B, C_A, C_B) #Return objects
 
+
+#def multi_temp_function(x, c1, c2, c3, c4, c5, T1, T2, T3, T4, T5): #Function of 5 temperatures and coefficients for fitting boltzmann diagrams of gas with multiple thermal components
+#	return c1*exp(-x/T1) + c2*exp(-x/T2) + c3*exp(-x/T3) + c4*exp(-x/T4) + c5*exp(-x/T5) 
+
+
+def multi_temp_func(x,b, c1, c2, c3, T1, T2, T3): #Function of 3 temperatures and coefficients for fitting boltzmann diagrams of gas with multiple thermal components
+    return b + log(c1*e**(-x/T1) + c2*e**(-x/T2)+ c3*e**(-x/T3))
+
+
 def linear_function(x, m, b): #Define a linear function for use with scipy.optimize curve_fit, for fitting rotation temperatures
 	return m*x + b
 
@@ -372,9 +381,9 @@ class differential_extinction:
 
 
 	
-def import_cloudy(): #Import cloudy model from cloudy directory
-	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model
-	model = paths.readline().split(' ')[0]
+def import_cloudy(model=''): #Import cloudy model from cloudy directory
+	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model from process_model/input.dat
+	input_model = paths.readline().split(' ')[0]
 	distance = float(paths.readline().split(' ')[0])
 	inner_radius = float(paths.readline().split(' ')[0])
 	slit_area = float(paths.readline().split(' ')[0])
@@ -382,6 +391,8 @@ def import_cloudy(): #Import cloudy model from cloudy directory
 	plot_dir = paths.readline().split(' ')[0]
 	table_dir =  paths.readline().split(' ')[0]
 	paths.close()
+	if model == '': #If no model is specified by the user, read in model set in process_model/input.dat
+		model = input_model
 	filename = data_dir+model+'.h2.lines'
 	#filename = data_dir+model+".h2.coldens" #Name of file to open
 	#stop()
@@ -621,16 +632,16 @@ class h2_transitions:
    	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Output a latex table of column densities for each H2 line
    		lines = []
    		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{lrrrrrr}")
+   		lines.append(r"\begin{longtable}{llrrrrr}")
    		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
    		#lines.append("\begin{scriptsize}")
    		#lines.append(r"\begin{tabular}{cccc}")
   		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\lambda_{\mbox{\tiny vaccum}}$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endfirsthead")
    		lines.append(r"\hline")
-   		lines.append(r"\htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\lambda_{\mbox{\tiny vaccum}}$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endhead")
    		lines.append(r"\hline")
@@ -651,8 +662,8 @@ class h2_transitions:
 	   			sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 	   			for j in xrange(len(labels)):
 					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
-					lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) + " & " + r"%1.5f" % wave[j] +   " & $" + "%1.2f" % log(N[j]) 
-						+ r"^{+%1.2f" % (-log(N[j]) + log(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log(N[j]) + log(N[j]-sig_N[j])) +r"} $ \\") 
+					lines.append(r"%1.5f" % wave[j] + " &  " + labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) +  
+						 " & $" + "%1.2f" % log(N[j]) + r"^{+%1.2f" % (-log(N[j]) + log(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log(N[j]) + log(N[j]-sig_N[j])) +r"} $ \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
@@ -706,12 +717,19 @@ class h2_transitions:
 		residuals = e**(log_N-y)
 		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[21.0,15], x_range=[0.0,55000.0], y_range=array([-5.25,15.25])): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
+	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[18.0,11.0], x_range=[0.0,55000.0], y_range=array([-5.25,15.25]),
+		plot_residual_temp=False, residual_temp=default_single_temp, residual_temp_y_intercept=default_single_temp_y_intercept, multi_temp_fit=False,
+		take_ratio=False): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
 		fname = self.path + '_'+name+'.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			ratio = copy.deepcopy(self)
-			ratio.N = (self.N / h2_model.N)
-			ratio.Nsigma = (self.Nsigma /h2_model.N)
+			if take_ratio: #If user actually wants to take a ratio
+				ratio.N = (self.N / h2_model.N) #Take a ratio
+				ratio.Nsigma = self.Nsigma /  h2_model.N
+			else: #If user doesn ot specifiy acutally taking a ratio
+				ratio.N = self.N - h2_model.N
+				ratio.Nsigma = self.Nsigma
+			#ratio.Nsigma = (self.Nsigma /h2_model.N)
 			### Set up subplotting
 			subplots(2, sharex="col") #Set all plots to share the same x axis
 			tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
@@ -729,10 +747,17 @@ class h2_transitions:
 			setp(frame.get_xticklabels(), visible=False)
 			#subplot(gs[3])
 			subplot(gs[1])
-			ratio.v_plot(orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
-			ylabel("Column Density Ratio of Data to Model   ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)]", fontsize=18)
+			ratio.v_plot(orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True,
+				plot_single_temp=plot_residual_temp, single_temp=residual_temp, single_temp_y_intercept=residual_temp_y_intercept, multi_temp_fit=multi_temp_fit)
+			if take_ratio:
+				ylabel("Data/Model ratio  ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)", fontsize=18)
+			else:
+				ylabel("Data-Model  ln((N$_u$-$N_m$)/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
 			xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
 			pdf.savefig()
+			
+
+
 			### Middle
 			# V=[1,3,5,7,9,11,13]
 			# subplot(gs[1])
@@ -862,7 +887,7 @@ class h2_transitions:
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
-   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False):
+   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_color='none'):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -888,10 +913,14 @@ class h2_transitions:
 				x = arange(0,200000, 10) #Set up an ax axis 
 				interp_single_temp = interp1d(x, single_temp_y_intercept - (x / single_temp), kind='linear') #create interpolation object for the single temperature
 				data_single_temp = interp_single_temp(self.T) #Create array of the single temperature for subtraction from the column density later on
-				log_N = log(self.N/self.g) - data_single_temp #Log of the column density
-				plus_one_sigma = abs(log_N  + data_single_temp - log((self.N + self.Nsigma)/self.g) )
-				minus_one_sigma = abs(log_N + data_single_temp - log((self.N + self.Nsigma)/self.g) )
-				upper_limits = log(self.Nsigma*3.0/self.g) - data_single_temp
+				#log_N = log(self.N/self.g) - data_single_temp #Log of the column density
+				log_N = log((self.N/self.g) - exp(data_single_temp))
+				#plus_one_sigma = abs(log_N  + data_single_temp - log((self.N + self.Nsigma)/self.g) )
+				#minus_one_sigma = abs(log_N + data_single_temp - log((self.N + self.Nsigma)/self.g) )
+				#upper_limits = log(self.Nsigma*3.0/self.g) - data_single_temp
+				plus_one_sigma = abs(log_N  - log((self.N + self.Nsigma)/self.g) )
+				minus_one_sigma = abs(log_N - log((self.N - self.Nsigma)/self.g) )
+				upper_limits = log((self.Nsigma*3.0/self.g) - exp(data_single_temp))
 			elif rot_temp_residuals: #If user has previously calculated rotation temperatures for each ladder, here they can show the residuals after subtracting the linear fits 
 				log_N = log(self.res_rot_T)
 				plus_one_sigma = abs(log_N  - log(self.res_rot_T + (self.Nsigma/self.g)))
@@ -905,7 +934,10 @@ class h2_transitions:
 			#plus_one_sigma = abs(log_N - data_single_temp - log(self.N - exp(data_single_temp) + self.Nsigma)) #Upper 1 sigma errors in log space
 			#minus_one_sigma = abs(log_N - data_single_temp  - log(self.N - exp(data_single_temp) - self.Nsigma)) #Lower 1 sigma errors in log space
 			for i in use_upper_v_states:
-				if nocolor: #If user specifies no color,
+				if single_color != 'none': #If user specifies a specific color, use that single color
+					current_color = single_color
+					current_symbol = 'o'
+				elif nocolor: #If user specifies no color,
 					current_color = 'gray'
 					current_symbol = symbol_list[i]
 				else: #Or else by default use colors from the color list defined at the top of the code
@@ -948,7 +980,10 @@ class h2_transitions:
 						self.res_rot_T[ortho] = residuals #Save residuals for individual data points from the rotation tmeperature fit
 						self.sig_res_rot_T[ortho] = sigma_residuals #Save the uncertainity in the residuals from the rotation temp fit (point uncertainity and fit uncertainity added in quadrature)
 			for i in use_upper_v_states:
-				if nocolor: #If user specifies no color,
+				if single_color != 'none': #If user specifies a specific color, use that single color
+					current_color = single_color
+					current_symbol = '^'
+				elif nocolor:
 					current_color = 'Black'
 					current_symbol = symbol_list[i]
 				else: #Or else by default use colors from the color list defined at the top of the code
@@ -1024,6 +1059,26 @@ class h2_transitions:
 				plot(x, single_temp_y_intercept - (x / single_temp), linewidth=2, color='orange')
 				midpoint = size(x)/2
 				text(0.7*x[midpoint], 0.7*(single_temp_y_intercept - (x[midpoint] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
+			if multi_temp_fit: #If user specifies they want to fit a multi temperature gas
+				goodpix = (self.s2n > 5.0) & (self.N > 0.)
+				x = self.T[goodpix]
+				y = log(self.N[goodpix]/self.g[goodpix])
+				vary_y_intercept = 7.0
+				vary_temp = 3000.0
+				vary_coeff = 0.6
+				guess = array([15.0, 0.85, 0.15, 1e-8, 350.0, 650.0, 5500.0])
+				upper_bound = guess + array([vary_y_intercept, vary_coeff, vary_coeff, vary_coeff, vary_temp, vary_temp, vary_temp])
+				lower_bound = guess - array([vary_y_intercept, vary_coeff, vary_coeff, vary_coeff, vary_temp, vary_temp, vary_temp])
+				fit, cov = curve_fit(multi_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
+				b = fit[0]
+				c = [fit[1], fit[2], fit[3]]
+				T = [fit[4], fit[5], fit[6]]
+				x = arange(0.0,70000.0,0.1)
+				plot(x, b+log(c[0]*e**(-x/T[0]) + c[1]*e**(-x/T[1])+ c[2]*e**(-x/T[2])),'--', color='Black', linewidth=2)# + c[3]*e**(-x/T[3]) + c[4]*e**(-x/T[4]) + + c[5]*e**(-x/T[5])))
+				print 'Results from temperature fit to Boltzmann diagram data:'
+				print 'b = ', b 
+				print 'c = ', c 
+				print 'T = ', T
 			#show()
 			draw()
 			if savepdf:
