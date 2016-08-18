@@ -726,11 +726,11 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
    		#lines.append("\begin{scriptsize}")
    		#lines.append(r"\begin{tabular}{cccc}")
    		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & km s$^{-1}$ shift  & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
+   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & shift (km s$^{-1}$)   & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endfirsthead")
    		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & km s$^{-1}$ shift & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
+   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & shift (km s$^{-1}$) & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
    		lines.append(r"\hline\hline")
    		lines.append(r"\endhead")
    		lines.append(r"\hline")
@@ -910,7 +910,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 				chi_sq = 0.
 				for j in xrange(sci1d_obj.n_orders):
 					weights = oh1d.orders[j].flux
-					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i] * slit_length)
+					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i])
 					#print 'order ', j ,' gives chisq = ', chi_sq
 					store_chi_sq[i] += nansum((diff*weights)**2)
 			oh_scale = scales[store_chi_sq == flat_nanmin(abs(store_chi_sq))][0]
@@ -925,9 +925,9 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
 					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0] * slit_length, color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black')
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1] * slit_length, color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black')
 				xlabel('$\lambda$ [$\mu$m]')
 				ylabel('Relative Flux')
 				pdf.savefig()
@@ -936,9 +936,9 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
 					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0] * slit_length, color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black')
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1] * slit_length, color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black')
 					xlabel('$\lambda$ [$\mu$m]')
 					ylabel('Relative Flux')
 					pdf.savefig()
@@ -947,9 +947,9 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 				use_oh_scale = oh_scale[0]
 			else:
 				use_oh_scale = oh_scale[1]
-			sci1d_obj.orders[i].flux -= oh1d.orders[i].flux * use_oh_scale * slit_length
+			sci1d_obj.orders[i].flux -= oh1d.orders[i].flux * use_oh_scale 
 			if twodim: #If user specifies a two dimensional object
-				sci2d_obj.orders[i].flux -= oh1d.orders[i].flux * use_oh_scale
+				sci2d_obj.orders[i].flux -= oh1d.orders[i].flux * use_oh_scale / slit_length
 			# if twodim: #If user specifies a two dimensional object
 			# 	#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
 			# 	sci2d_obj.orders[i].flux -= nanmedian(oh2d.orders[i].flux, 0) * use_oh_scale

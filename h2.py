@@ -1340,15 +1340,38 @@ class E:
 
 
 @jit
-def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, distribution, collisions=True, scale_factor=1e-10): #Speed up radiative cascade with numba
+def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, pure_rot_states, rovib_states_per_J, J, V, collisions=False, scale_factor=1e-10): #Speed up radiative cascade with numba
 	transition_amount = trans_A*time
-	para = J%1==0
-	ortho = J%1==1
-	ground_J1 = (J==1) & (V==0)
-	ground_J0 = (J==0) & (V==0)
+	#para = J%1==0
+	#ortho = J%1==1
+	#ground_J1 = (J==1) & (V==0)
+	#ground_J0 = (J==0) & (V==0)
+	#pure_rot_states = V == 0
+	#rovib_states = V > 1
+	#J_pure_rot_states = J[pure_rot_states]
 	n_states = len(N)
 	n_lines = len(trans_A)
+	time_x_scale_factor = time * scale_factor
 	for k in xrange(iterations): #loop through however many iterations user specifies
+	 	#N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
+	 	#N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
+	 	#N += distribution * scale_factor*time
+	 	if scale_factor > 0.:
+	 		for current_J in xrange(32): #Loop through each J
+		 		#current_rovib_states = (V > 1) & (J==current_J) #Grab index of current pure rotation state
+		 		#current_pure_rot_state = (V == 0) & (J==current_J) #Grab indicies of current rovibration states with the same J as the current pure rotation state
+		 		#current_pure_rot_state = pure_rot_states[current_J]
+		 		#current_rovib_states = rovib_states_per_J[current_J]
+		 		#num_current_rovib_states = len(N[current_rovib_states]) #Count number of rovibrational states we are going to redistribute the popluations from v=0 into
+		 		delta_N = N[pure_rot_states[current_J]] * time_x_scale_factor#How many molecules out of the pure rotation state to redistribute to higher v
+		 		N[rovib_states_per_J[current_J]] += delta_N / len(N[rovib_states_per_J[current_J]]) #num_current_rovib_states  #Redistribute fraction of pure rotation state molecules to higher v
+		 		N[pure_rot_states[current_J]] -= delta_N #Remove molecules in pure rotation state that have now been redistributed
+	 		#N[para] += scale_factor*distribution[para]#*N[ground_J0] #+ 0.5*(1.0-sum(N)))
+			#N[ortho] += scale_factor*distribution[ortho]#*N[ground_J1] #+ 0.5*(1.0-sum(N)))	
+		 	#N[ground_J0] = 0.
+		 	#N[ground_J1] = 0.
+		#N[pure_rot_states] = pure_rot_pops*sum(N[pure_rot_states]) / sum(pure_rot_pops) #Thermalize pure rotation states
+
 		store_delta_N = zeros(n_states)  #Set up array to store all the changes in N 
 		for i in xrange(n_lines):
 			delta_N = N[upper_states[i]]*transition_amount[i] 
@@ -1357,14 +1380,8 @@ def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, 
 		N += store_delta_N #Modfiy level populations after the effects of all the transitions have been summed up
 		if collisions: #If user specifies to use collisions
 			N -= 0.01*N*time*V  #Apply this very crude approximation of collisional de-excitation, which favors high V
-	 	#N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
-	 	#N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
-	 	#N += distribution * scale_factor*time
-	 	if scale_factor > 0.:
-	 		N[para] += scale_factor*distribution[para]#*N[ground_J0] #+ 0.5*(1.0-sum(N)))
-			N[ortho] += scale_factor*distribution[ortho]#*N[ground_J1] #+ 0.5*(1.0-sum(N)))	
-		 	N[ground_J0] = 0.
-		 	N[ground_J1] = 0.
+
+
 	return N
 
 
@@ -1433,6 +1450,13 @@ class states:
 		       7.53e-15, 3.57e-15, 1.68e-14, 6.02e-15, 2.41e-14, 7.85e-15, 2.92e-14, 9e-15, 3.18e-14, 9.43e-15, 0.0, 0.0, 6.55e-16, 6.7e-15, 3.18e-15, 
 			1.49e-14, 5.35e-15, 2.15e-14, 6.97e-15, 2.6e-14, 7.97e-15, 2.84e-14, 8.35e-15, 6.01e-16, 6.15e-15, 2.92e-15, 1.37e-14, 4.91e-15, 1.94e-14, 6.4e-15, 2.39e-14, 7.31e-15, 2.6e-14, 7.66e-15, 5.7e-16])
 		#self.BD76_cloud_center_pumping = 
+		pure_rot_states = [] #Save indicies of pure rotation states
+		rovib_states_per_J = [] #Save indicies of each set of rovib states of constant J
+		for current_J in xrange(32): #Loop through each rotation level
+			pure_rot_states.append((J == current_J) & (V == 0)) #Store indicies for a given J for pure rotation state
+			rovib_states_per_J.append((J == current_J) & (V > 0)) #Store indicies for a given J for all rovib. states where v>0
+		self.pure_rot_states = pure_rot_states
+		self.rovib_states_per_J = rovib_states_per_J
 	def total_N(self): #Grab total column density N and return it
 		return nansum(self.N) #Return total column density of H2
 	def cascade(self, time=1.0, temp=250.0, quick=0, showplot=True, iterations=1, scale_factor=1e-10, collisions=False): #Do a step in the radiative cascade
@@ -1447,40 +1471,43 @@ class states:
 		trans_A = self.transitions.A
 		upper_states = self.transitions.upper_states
 		lower_states = self.transitions.lower_states
+		pure_rot_states = self.pure_rot_states
+		rovib_states_per_J = self.rovib_states_per_J
 		#if quick != 0: #If user wants to speed up the cascade
 		#	maxthresh = -partsort(-trans_A,quick)[quick-1] #Find threshold for maximum
 		#else:
 		#	maxthresh = 0. #E
 		exponential = g * exp(-self.T/temp) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltmann_distribution = exponential / nansum(exponential)
-		ground_J1 = (J==1) & (V==0)
-		ground_J0 = (J==0) & (V==0)
+		# ground_J1 = (J==1) & (V==0)
+		# ground_J0 = (J==0) & (V==0)
 		if not self.start_cascade: #If cascade has not started yet 
 			N = zeros(self.n_states) #Start off with everything  = 0.0
-			pure_rotation_states = V == 0
-			const = 1e-3 #Fraction to populate other states at v > 0 to match the J levels of v=0
-			N[pure_rotation_states] = boltmann_distribution[pure_rotation_states] #preset the population to be the boltzmann distribution for only the pure rotation states
-			for current_J in J[pure_rotation_states]: #loop through each possible rotation state
-				other_vibrational_states_with_same_J = (J==current_J) & (~pure_rotation_states) #Find states at higher V with same J
-				if any(other_vibrational_states_with_same_J): #If any J states in v>0 matches the current J
-					N[other_vibrational_states_with_same_J] = const * N[pure_rotation_states & (J==current_J)] #Set level populations
-			#N = (1.-(J/10.)) + (1.-(V/14.0)) #Set populations based on V and J
-			#N[(V==14) & (J==1)] = 1.0
-			#N = self.BD76_formation_pumping
-			#N = self.BD76_cloud_boundary_pumping
-			#N = exp(-(0.5*(J+1)+0.3*(V+1)))
-	 		#N[V>-1] = exp(-(0.25*(J[V>-1]-1)+0.2*(V[V>-1]-1)))
-	 		#N[ground_J0] = 0.
-	 		#N[ground_J1] = 0.
-			#N = exp(-J.astype(float)-V.astype(float))
-			#N = ones(self.n_states)
-			N[V==0] == 0.
+			N = boltmann_distribution #preset the population to be the boltzmann distribution 
+			# pure_rotation_states = V == 0
+			# const = 1e-3 #Fraction to populate other states at v > 0 to match the J levels of v=0
+			# N[pure_rotation_states] = boltmann_distribution[pure_rotation_states] #preset the population to be the boltzmann distribution for only the pure rotation states
+			# for current_J in J[pure_rotation_states]: #loop through each possible rotation state
+			# 	other_vibrational_states_with_same_J = (J==current_J) & (~pure_rotation_states) #Find states at higher V with same J
+			# 	if any(other_vibrational_states_with_same_J): #If any J states in v>0 matches the current J
+			# 		N[other_vibrational_states_with_same_J] = const * N[pure_rotation_states & (J==current_J)] #Set level populations
+			# #N = (1.-(J/10.)) + (1.-(V/14.0)) #Set populations based on V and J
+			# #N[(V==14) & (J==1)] = 1.0
+			# #N = self.BD76_formation_pumping
+			# #N = self.BD76_cloud_boundary_pumping
+			# #N = exp(-(0.5*(J+1)+0.3*(V+1)))
+	 	# 	#N[V>-1] = exp(-(0.25*(J[V>-1]-1)+0.2*(V[V>-1]-1)))
+	 	# 	#N[ground_J0] = 0.
+	 	# 	#N[ground_J1] = 0.
+			# #N = exp(-J.astype(float)-V.astype(float))
+			# #N = ones(self.n_states)
+			# N[V==0] == 0.
 			N = N/sum(N) #Normalize
 			self.distribution = copy.deepcopy(N)
 			self.start_cascade = True #Then flip the flag so that the populations stay as they are
-		old_N = copy.deepcopy(self.N)
+		#old_N = copy.deepcopy(self.N)
 
-		N = run_cascade(iterations, time, N, trans_A, upper_states, lower_states, J, V, self.distribution, collisions=collisions, scale_factor=scale_factor) #Test cascade with numba
+		N = run_cascade(iterations, time, N, trans_A, upper_states, lower_states, pure_rot_states, rovib_states_per_J, J, V, collisions=collisions, scale_factor=scale_factor) #Test cascade with numba
 		# transition_amount = trans_A*time
 		# para = J%1==0
 		# ortho = J%1==1
