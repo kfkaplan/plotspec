@@ -10,7 +10,7 @@ from scipy.stats import linregress
 import copy
 from scipy.linalg import lstsq
 from bottleneck import *
-from numba import jit #Import numba
+#from numba import jit #Import numba
 
 
 #Global variables, modify
@@ -21,7 +21,8 @@ lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction
 wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
-cloudy_dir = '/Users/kfkaplan/Dropbox/cloudy/'
+#cloudy_dir = '/Users/kfkaplan/Dropbox/cloudy/'
+cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
 cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -97,6 +98,16 @@ def import_black_and_van_dishoeck(): #Read in line intensities for model 14 from
 	model.calculate_column_density() #Calculate column densities from model 14
 	model.normalize()
 	return model #Return object
+
+#Read in an ascii file in the format line \t flux \t sigma, normalize, and caclulate column densities from the fluxs given
+def import_data(file_name, normalize_to='5-3 O(3)'):
+	labels = loadtxt(file_name, usecols=(0,), dtype='str', unpack=True, delimiter='\t') #Read in H2 line labels
+	flux, sigma = loadtxt(file_name, usecols=(1,2,), dtype='float', unpack=True, delimiter='\t') #Read in line fluxes and uncertainities
+	h = make_line_list() #Create object
+	h.read_data(labels, flux, sigma) #Stick fluxes and uncertainities into this line list object
+	h.calculate_column_density(normalize=False) #Calculate column densities from data
+	h.normalize(label=normalize_to) #Normalize to the line defined above
+	return h #Return object
 
 #This defintion reads in the data from Takahashi & Uehara 2001 and creates an H2 transitions object storing the data, this is for comparing
 #the IGRINS data to formation pumping models
@@ -382,6 +393,7 @@ class differential_extinction:
 
 	
 def import_cloudy(model=''): #Import cloudy model from cloudy directory
+	h = make_line_list() #Make H2 transitions object
 	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model from process_model/input.dat
 	input_model = paths.readline().split(' ')[0]
 	distance = float(paths.readline().split(' ')[0])
@@ -393,30 +405,30 @@ def import_cloudy(model=''): #Import cloudy model from cloudy directory
 	paths.close()
 	if model == '': #If no model is specified by the user, read in model set in process_model/input.dat
 		model = input_model
+	#READ IN LEVEL COLUMN DENSITY FILE
+	# filename = data_dir+model+".h2col" #Name of file to open
+	# v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
+	# for i in xrange(len(v)): #Loop through each rovibrational energy level
+	# 	found_transitions = (h.V.u == v[i]) & (h.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
+	# 	h.N[found_transitions] = N[i] #Set column density of transitions
+	#READ IN LINE EMISSION FILE AND CONVERT LINE EMISSION TO COLUMN DENSITIES
 	filename = data_dir+model+'.h2.lines'
-	#filename = data_dir+model+".h2.coldens" #Name of file to open
-	#stop()
-	#COMMENT OUT COLUMN DENSITY FILE FOR NOW
-	#v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
-	#Read in data from xxxx.h2
-	#line, Ehi, Vhi, Jhi, Elo, Vlo, Jlo, wl_mic, wl_lab, log_L, I_ratio, Excit, gu_h_nu_aul = genfromtxt(data_dir+model+'.h2', unpack=True, dtype='a', delimiter='\t')
-	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
-	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
-	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
-	L=10**log_L #Convert log luminosity to linear units
-
-	h = make_line_list() #Make H2 transitions object
-	for i in xrange(len(L)): #Loop through each transition
-		current_transition = (h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i]) #Find current transition in h2 transitions object for list of H2 lines cloudy outputs
-		h.F[current_transition] = L[i] #Set flux to be equal to the luminosity of the line outputted by cloudy
-
-	#for i in xrange(len(v)): #Loop through each rovibrational energy level
-	#	found_transitions = (h.V.u == v[i]) & (h.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
-#		h2_transitions.N[found_transitions] = N_over_g[i] #Set column density of transitions
-	h.calculate_column_density()
-	#h2_transitions.N = h2_transitions.N / h2_transitions.N[h2_transitions.label == '1-0 S(1)']
+ 	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
+ 	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
+ 	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
+ 	L=10**log_L #Convert log luminosity to linear units
+ 	for i in xrange(len(L)): #Loop through each transition
+ 		current_transition = (h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i]) #Find current transition in h2 transitions object for list of H2 lines cloudy outputs
+ 		h.F[current_transition] = L[i] #Set flux to be equal to the luminosity of the line outputted by cloudy
+ 	h.calculate_column_density()
 	h.normalize() #Normalize to the 5-3 O(3) line
 	return(h)
+
+def combine_models(model1, model2, weight1, weight2): #Combine two models scaling each by their given weights
+	combined_model = make_line_list() #Make new object for combination of both nmodels
+	i = (model1.N > 0.) & (model2.N > 0.) #Use only models that include the same lines in each
+	combined_model.N[i] = model1.N[i] * weight1 + model2.N[i] * weight2 #Combine the level column densities weighted by the given weights
+	return combined_model #Return the single combined model
 
 def import_emissivity(x_range=[4.25e17, 4.5e17], dr=5e15): #Import Cloudy model emmisivity adn integrate using given range
 	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model
@@ -557,16 +569,37 @@ class h2_transitions:
 	def calculate_flux(self): #Calculate flux for a given calculated column density (ie. if you set it to thermalize)
 		#self.F = self.N * self.g * self.E.diff() * h * c * self.A
 		self.F = self.N * self.E.diff() * h * c * self.A
+	def generate_synthetic_spectrum(self, wave_range=[1.45,2.45], pixel_size=1e-5, line_fwhm=7.5, centroid=0.): #Generate a synthetic 1D spectrum based on stored flux values in this object, can be used to synthesize spectra from Cloudy models, or thermal gas generated by the "thermalize" command
+		#n_pixels = (wave_range[1] - wave_range[0])/pixel_size #Calcualte number of pixels in 1D sythetic spectrum
+		#velocity_grid = arange(-500,500,0.01) #Create velocity grid
+		c_km_s = c / 1e5 #Get speed of light in km/s
+		sigma = line_fwhm / 2.0*sqrt(2.0*log(2.0)) #Convert FWHM into sigma for a gaussian
+		alpha = 2.0*sigma**2 #Calcualte alpha for gaussian
+		beta =  (1.0/sqrt(pi*alpha)) #Calculate another part (here called beta) for the gaussian profile
+		#line_profile =  beta *  exp(-((velocity_grid-centroid)**2/(alpha))) #Calculate normalizeable line profile in velocity space
+		wave = arange(wave_range[0], wave_range[1], pixel_size) #Create wavelength array for 1D synthetic spectrum
+		flux = zeros(len(wave)) #Create flux array for 1D synthetic spectrum
+		for i in xrange(len(self.wave)):
+			current_wavelength = self.wave[i]
+			if (current_wavelength > wave_range[0]) and (current_wavelength < wave_range[1]):
+				#Interpolate line profile into wavelength space
+				#velocity_grid = c_km_s * ((wave/current_wavelength) - 1.0) #Create velocity grid from wavelength grid
+				line_profile =  beta *  exp(-((c_km_s * ((wave/current_wavelength) - 1.0)-centroid)**2/(alpha))) #Calculate gaussian line profile in wavelength space
+				flux = flux + self.F[i]*line_profile #Build up line on flux grid
+		return wave, flux #Return wavlelength and flux grids
 	def normalize(self, label='5-3 O(3)'):
 		i = self.label == label
-		normalize_by_this = self.N[i] / self.g[i]#Grab column density of line to normalize by
-		self.N /= normalize_by_this #Do the normalization
-		self.Nsigma /= normalize_by_this #Ditto on the uncertainity
+		if self.N[i] > 0.: #Check if line even exists
+			normalize_by_this = self.N[i] / self.g[i]#Grab column density of line to normalize by
+			self.N /= normalize_by_this #Do the normalization
+			self.Nsigma /= normalize_by_this #Ditto on the uncertainity
+		else:
+			print "ERROR: Attempted to normalize by the " + label + " line, but it appears to not exist.  No normalization done.  Try a different line?"
 	def thermalize(self, temperature): #Set all column densities to be thermalized at the specified temperature, normalized to the 1-0 S(1) line
 		exponential = self.g * exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
 		self.N = boltzmann_distribution #Set column densities to the boltzmann distribution
-		self.normalize() #Normalize to the 1-0 S(1) line
+		#self.normalize() #Normalize to the 1-0 S(1) line
 		self.calculate_flux() #Calculate flux of new lines after thermalization
 	def makelabel(self): #Make labels for each transition in spectroscopic notation.
 		labels = []
@@ -622,6 +655,12 @@ class h2_transitions:
 		for i in xrange(len(labels)): #Loop through each line
 			matched_line = (self.label == labels[i]) #Match to H2 line
 			self.F[matched_line] = flux[i] #Set flux to flux from model
+	def read_data(self, labels, flux, sigma):
+		for i in xrange(len(labels)): #Loop through each line
+			matched_line = (self.label == labels[i]) #Match to H2 line
+			self.F[matched_line] = flux[i] #Set flux to flux from data
+			self.sigma[matched_line] = sigma[i] #Set uncertainity to uncertainity from data
+			self.s2n[matched_line] = flux[i] / sigma[i] #Calculate S/N
 	def quick_plot(self): #Create quick boltzmann diagram for previewing and testing purposes
 		nonzero = self.N != 0.0
 		clf()
@@ -656,13 +695,13 @@ class h2_transitions:
 	   			labels = self.label[i][s] #Grab line labels
 	   			J =  self.J.u[i][s] #Grab upper J
 	   			N = self.N[i][s] / self.g[i][s] #Grab column density N/g
-	   			E = self.E.u[i][s]
+	   			E = self.T[i][s]
 	   			A = self.A[i][s]
 	   			wave = self.wave[i][s]
 	   			sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 	   			for j in xrange(len(labels)):
 					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
-					lines.append(r"%1.5f" % wave[j] + " &  " + labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) +  
+					lines.append(r"%1.6f" % wave[j] + " &  " + labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) +  
 						 " & $" + "%1.2f" % log(N[j]) + r"^{+%1.2f" % (-log(N[j]) + log(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log(N[j]) + log(N[j]-sig_N[j])) +r"} $ \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
@@ -681,7 +720,7 @@ class h2_transitions:
 				labels = self.label[i][s] #Grab line labels
 				J =  self.J.u[i][s] #Grab upper J
 				N = self.N[i][s] / self.g[i][s] #Grab column density N\
-				E = self.E.u[i][s]
+				E = self.T[i][s]
 				sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 				wave = self.wave[i][s] #Grab wavelength of line
 				for j in xrange(len(labels)): #Loop through each rotation ladder
@@ -717,15 +756,21 @@ class h2_transitions:
 		residuals = e**(log_N-y)
 		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[18.0,11.0], x_range=[0.0,55000.0], y_range=array([-5.25,15.25]),
+	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[17.0,10.5], x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), ratio_y_range=[1e-1,1e1],
 		plot_residual_temp=False, residual_temp=default_single_temp, residual_temp_y_intercept=default_single_temp_y_intercept, multi_temp_fit=False,
-		take_ratio=False): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
+		take_ratio=False, s2n_cut=3.0): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
 		fname = self.path + '_'+name+'.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
+			show_these_v  = [] #Set up a blank vibration array to automatically fill 
+			for v in xrange(14): #Loop through and check each set of states of constant v
+				if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
+					show_these_v.append(v) #store this vibration state for later plotting
 			ratio = copy.deepcopy(self)
 			if take_ratio: #If user actually wants to take a ratio
-				ratio.N = (self.N / h2_model.N) #Take a ratio
-				ratio.Nsigma = self.Nsigma /  h2_model.N
+				ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
+				ratio.Nsigma = self.Nsigma  /  h2_model.N
+				chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
+				print 'Compare model for ' + name + ' sum(log10(ratios)**2) = ', chi_sq
 			else: #If user doesn ot specifiy acutally taking a ratio
 				ratio.N = self.N - h2_model.N
 				ratio.Nsigma = self.Nsigma
@@ -735,27 +780,29 @@ class h2_transitions:
 			tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
 			fig = gcf()#Adjust aspect ratio
 			fig.set_size_inches(figsize) #Adjust aspect ratio
-			subplots_adjust(hspace=0, wspace=0) #Set all plots to have no space between them vertically
+			subplots_adjust(hspace=0.037, wspace=0) #Set all plots to have no space between them vertically
 			gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
 			### Left side
 			subplot(gs[0])
-			h2_model.v_plot(orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
-			self.v_plot(orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
+			h2_model.v_plot(V=show_these_v, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
+			self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut)
 			ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
 			V = range(1,14)
 			frame = gca() #Turn off axis number labels
 			setp(frame.get_xticklabels(), visible=False)
 			#subplot(gs[3])
 			subplot(gs[1])
-			ratio.v_plot(orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True,
-				plot_single_temp=plot_residual_temp, single_temp=residual_temp, single_temp_y_intercept=residual_temp_y_intercept, multi_temp_fit=multi_temp_fit)
+			plot([0,100000],[1,1], linestyle='--', color='gray')
+			ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True,
+				plot_single_temp=plot_residual_temp, single_temp=residual_temp, single_temp_y_intercept=residual_temp_y_intercept, multi_temp_fit=multi_temp_fit, show_ratio=True, s2n_cut=s2n_cut, y_range=ratio_y_range)
 			if take_ratio:
-				ylabel("Data/Model ratio  ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)", fontsize=18)
+				#ylabel("Data/Model ratio  ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)", fontsize=18)
+				ylabel("Data/Model Ratio", fontsize=18)
 			else:
 				ylabel("Data-Model  ln((N$_u$-$N_m$)/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
 			xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
 			pdf.savefig()
-			
+		return(chi_sq) #Return chisq value to quantify the goodness of fit
 
 
 			### Middle
@@ -887,7 +934,8 @@ class h2_transitions:
    	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
-   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_color='none'):
+   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_color='none',
+   		show_ratio=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -921,6 +969,14 @@ class h2_transitions:
 				plus_one_sigma = abs(log_N  - log((self.N + self.Nsigma)/self.g) )
 				minus_one_sigma = abs(log_N - log((self.N - self.Nsigma)/self.g) )
 				upper_limits = log((self.Nsigma*3.0/self.g) - exp(data_single_temp))
+			elif show_ratio: #If user is plotting column density ratios, keep things in linear form and use linear axes on a log scale
+				log_N = self.N #Not really log N but you get the idea
+				log_N[log_N<=0.] = nan #Nan out zero and negative values, since they are essentialy meaningless anyway and won't plot on a log plot
+				plus_one_sigma = self.Nsigma #Set error bars in linear space
+				minus_one_sigma = self.Nsigma
+				find_negative_sigma = log_N < minus_one_sigma #Find negative sigma
+				minus_one_sigma[find_negative_sigma] = 1e-1 * log_N[find_negative_sigma] #Just make negative error bars 1/10 of data so it can still be plotted on log plot
+				semilogy() #Set y axis to be semi log
 			elif rot_temp_residuals: #If user has previously calculated rotation temperatures for each ladder, here they can show the residuals after subtracting the linear fits 
 				log_N = log(self.res_rot_T)
 				plus_one_sigma = abs(log_N  - log(self.res_rot_T + (self.Nsigma/self.g)))
@@ -947,7 +1003,7 @@ class h2_transitions:
 					#current_symbol = current_symbol + '-' #Draw a line between each symbol
 					current_symbol = '-'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
-				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
+				if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
 					if no_legend_label:
 						use_label = '_nolegend_'
 					else:
@@ -993,7 +1049,7 @@ class h2_transitions:
 					#current_symbol = current_symbol + ':' #Draw a line between each symbol
 					current_symbol = ':'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
-				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
+				if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
 					if no_legend_label: #Check if user wants to use legend labes, if not ignore the label
 						use_label = '_nolegend_'
 					else:
@@ -1339,7 +1395,7 @@ class E:
 		self.l = self.l[sort_object] #Sort lower states
 
 
-@jit
+#@jit
 def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, pure_rot_states, rovib_states_per_J, J, V, collisions=False, scale_factor=1e-10): #Speed up radiative cascade with numba
 	transition_amount = trans_A*time
 	#para = J%1==0
@@ -1457,6 +1513,15 @@ class states:
 			rovib_states_per_J.append((J == current_J) & (V > 0)) #Store indicies for a given J for all rovib. states where v>0
 		self.pure_rot_states = pure_rot_states
 		self.rovib_states_per_J = rovib_states_per_J
+	def thermalize(self, temperature, N_tot=1.0): #Set populations to be thermal at the user supplied temperature
+		exponential = self.g * exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
+		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
+		self.N = boltzmann_distribution * N_tot #Set column densities to the boltzmann distribution
+	def generate_synthetic_spectrum(self, wave_range=[1.45,2.45], pixel_size=1e-5, line_fwhm=7.5, centroid=0.): #Generate a synthetic 1D spectrum based on stored flux values in this object, can be used to synthesize spectra from Cloudy models, or thermal gas generated by the "thermalize" command
+		self.set_transition_column_densities() #Set column densities from the states class object here
+		self.transitions.calculate_flux()
+		w, f = self.transitions.generate_synthetic_spectrum(wave_range=wave_range, pixel_size=pixel_size, line_fwhm=line_fwhm, centroid=centroid)
+		return w, f #Send the wavelength and flux arrays back to you
 	def total_N(self): #Grab total column density N and return it
 		return nansum(self.N) #Return total column density of H2
 	def cascade(self, time=1.0, temp=250.0, quick=0, showplot=True, iterations=1, scale_factor=1e-10, collisions=False): #Do a step in the radiative cascade
