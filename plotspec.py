@@ -1317,7 +1317,7 @@ class spec1d:
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print 'No spectrum of combined orders found.  Createing combined spectrum.'
 			self.combine_orders() #Combine spectrum before plotting, if not done already
-		savetxt(save.path + name, transpose([self.combospec.wave, self.combospec.flux, self.combospec.noise,])) #Save 1D spectrum as simple .dat file with wavelength, flux, and noise in seperate columns
+		savetxt(save.path + name, transpose([self.combospec.wave, self.combospec.flux, self.combospec.noise])) #Save 1D spectrum as simple .dat file with wavelength, flux, and noise in seperate columns
 	def fitgauss(self,line_list, v_range=[-30.0,30.0]): #Fit 1D gaussians to the 1D spectra and plot results
 		self.fwhm = zeros(len(line_list.lab_wave)) #Store FWHM of all found lines
 		fit_g = fitting.LevMarLSQFitter() #Initialize minimization algorithim for fitting gaussian
