@@ -9,6 +9,7 @@ import matplotlib
 
 #Import libraries
 import os #Import OS library for checking and creating directories
+import json #For reading in json files, ie. wavelength solutions given by the PLP not in fits files
 from astropy.io import fits #Use astropy for processing fits files
 from astropy.modeling import models, fitting #import the astropy model fitting package
 import pyregion #For reading in regions from DS9 into python
@@ -168,7 +169,8 @@ def flexure(array_to_correct, correction):
 		rolled_array_plus_one = roll(array_to_correct, integer_correction+1) #Roll array an extra one pixel to the right
 	else: #For a negative correction
 		rolled_array_plus_one = roll(array_to_correct, integer_correction-1) #Roll array an extra one pixel to the left
-	corrected_array = rolled_array*(1.0-fractional_correction) + rolled_array_plus_one*(fractional_correction) #interpolate over the fraction of a pixel
+	corrected_array = rolled_array*(1.0-abs(fractional_correction)) + rolled_array_plus_one*abs(fractional_correction) #interpolate over the fraction of a pixel
+	#stop()
 	return corrected_array
 
 #Artifically redden a spectrum,
@@ -218,11 +220,12 @@ def mask_hydrogen_lines(wave, flux):
 
 
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[]):
+def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[], std_shift=0.0):
 	# #Read in Vega Data
+	std.combine_orders() #Combine orders for standard star specturm for later plotting
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
-	vega_wave /= 1e3 #convert angstroms to microns
+	vega_wave = (vega_wave / 1e3)*(1.0 + std_shift/c) #convert angstroms to microns and shift wavelengths if a velocity correction is given by the user
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega, taken between H I lines in the model spectrum vegallpr25.50000resam5
@@ -243,66 +246,76 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
 	if savechecks: #If user specifies saving pdf check files 
 		with PdfPages(save.path + 'check_flux_calib.pdf') as pdf: #Load pdf backend for saving multipage pdfs
-			clf() #Clear interactive matplotlib figure for comparing correction of Br-Gamma to A0V continuum on first page
-			br_gamma_order =  std.orders[11].flux #For first page, inspect correction to Br-Gamma, here we load order with Br-Gamma into memory
-			average_around_br_gamma = (std.orders[10].flux +  std.orders[12].flux) * 0.5 #Plot average of orders above and below to get idea of what A0V continuum should be
-			plot(br_gamma_order, color='red') #Plot order with Br-Gamma, uncorrected for H I absorption
-			plot(br_gamma_order * (a0v_synth_cont(std.orders[11].wave)/a0v_synth_spec(std.orders[11].wave)), color='black') #Plot order with Br-Gamma with correction for H I absorption
-			plot(average_around_br_gamma, '--', color='blue') #Plot average of two orders around Br-Gamma which should well represent A0V continuum
-			pdf.savefig() #Save showing A0V Br-Gamma absorption, correction, and comparison to continuum on first page in pdf
-			clf() #Plot Vega model spectrum on s3cond page
-			plot(vega_wave, vega_flux, '--', color='blue') #Plot vega model
+			#Plot easy preview check of how well the H I lines are being corrected
+			clf() #Clear page first
+			expected_continuum = copy.deepcopy(std_flattened) #Create object to store the "expected continuum" which will end up being the average of each order's adjacent blaze functions from what the PLP thinks the blaze is for the standard star
+			g = Gaussian1DKernel(stddev=5.0) #Do a little bit of smoothing of the blaze functions
+			for i in range(2,std.n_orders-2): #Loop through each order
+			        adjacent_orders = array([convolve(std.orders[i-1].flux/std_flattened.orders[i-1].flux, g),   #Combine the order before and after the current order, while applying a small amount of smoothing
+			                                 convolve(std.orders[i+1].flux/std_flattened.orders[i+1].flux, g),])
+			        mean_order = nanmean(adjacent_orders, axis=0) #Smooth the before and after order blazes together to estimate what we think the continuum/blaze should be
+			        expected_continuum.orders[i].flux = mean_order #Save the expected continuum
+			expected_continuum.combine_orders()#Combine all the orders in the expected continuum
+			HI_line_waves = [2.166120, 1.7366850, 1.6811111, 1.5884880] #Wavelengths of H I lines will be previewing
+			HI_line_labes = ['Br-gamma','Br-10','Br-11', 'Br-14'] #Names of H I lines we will be previewing
+			delta_wave = 0.012 # +/- wavelength range to plot on the xaxis of each line preview
+			n_HI_lines = len(HI_line_waves) #Count up how many H I lines we will be plotting
+			subplots(nrows=2, ncols=2) #Set up subplots
+			figtext(0.02,0.5,r"Flux", fontsize=20,rotation=90) #Set shared y-axis label
+			figtext(0.4,0.02,r"Wavelength [$\mu$m]", fontsize=20,rotation=0) #Set shared x-axis label
+			figtext(0.15,0.95,r"Check AOV H I line fits (y-scale: "+str(y_scale)+", wave_smooth: "+str(wave_smooth)+", std_shift: "+str(std_shift)+")", fontsize=20,rotation=0) #Shared title
+			waves = std.combospec.wave #Wavelength array to interpolate to
+			normalized_HI_lines = a0v_synth_cont(waves)/a0v_synth_spec(waves) #Get normalized lines to the wavelength array
+			for i in xrange(n_HI_lines): #Loop through each H I line we want to preview
+				subplot(2,2,i+1) #Set up current line's subplot
+				#tight_layout(pad=5) #Use tightlayout so things don't overlap
+				fig = gcf()#Adjust aspect ratio
+				fig.set_size_inches([15,10]) #Adjust aspect ratio
+				plot(std.combospec.wave, std.combospec.flux, label='H I Uncorrected', color='gray') #Plot raw A0V spectrum, no H I correction applied
+				plot(std.combospec.wave, std.combospec.flux*normalized_HI_lines, label='H I Corrected',color='black') #Plot raw A0V spectrum with H I correction applied
+				plot(expected_continuum.combospec.wave, expected_continuum.combospec.flux, label='Expected Continuum', color='blue') #Plot expected continuu, which the average of each order's adjacent A0V continnua
+				xlim(HI_line_waves[i]-delta_wave, HI_line_waves[i]+delta_wave) #Set x axis range
+				j = (std.combospec.wave > HI_line_waves[i]-delta_wave) & (std.combospec.wave < HI_line_waves[i]+delta_wave) #Find only pixels in window of x-axis range for automatically determining y axis range
+				max_flux = nanmax(std.combospec.flux[j]*normalized_HI_lines[j]) #Min y axis range
+				min_flux = nanmin(std.combospec.flux[j]*normalized_HI_lines[j]) #Max y axis range
+				ylim([0.9*min_flux,1.02*max_flux]) #Set y axis range
+				title(HI_line_labes[i]) #Set title
+				if i==n_HI_lines-1: #If last line is being plotted
+					legend(loc='lower right') #plot the legend
+			tight_layout(pad=4)
+			pdf.savefig() #Save plots showing how well the H I correciton (scaling H I lines from Vega) fits
+			clf() #Plot Vega model spectrum on second page
+			plot(vega_wave, vega_flux, '--', color='blue', label='Model Vega Spectrum') #Plot vega model
 			premake_a0v_synth_cont = a0v_synth_cont(waves) #Load interpolated synthetic A0V spectrum into memory
-			plot(waves,premake_a0v_synth_cont, color='black') #Plot synthetic A0V continuum
+			plot(waves,premake_a0v_synth_cont, color='black', label='Synethic A0V Continuum') #Plot synthetic A0V continuum
 			xlim([flat_nanmin(waves),flat_nanmax(waves)]) #Set limits on plot
 			ylim([0., flat_nanmax(premake_a0v_synth_cont)])
+			xlabel(r'Wavelength [$\mu$m]')
+			ylabel(r'Relative Flux')
+			title('Check A0V Reddening (B='+str(B)+', V='+str(V)+')')
+			legend(loc="upper right")
+			tight_layout()
 			pdf.savefig()  #Save showing synthetic A0V spectrum that the data will be divided by to do relative flux calibration & telluric correction on second page of PDF
-			for i in xrange(std.n_orders): #Loop through and plot each order for the observed A0V, along with the corrected H I absorption to see how well the synthetic A0V spectrum fits
-				if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-					std.orders[i].flux[std_flattened.orders[i].flux <= .1] = nan #Mask out bad pixels
-				waves = std.orders[i].wave #Std wavelengths
-				std_flux = std.orders[i].flux #Std flux
-				if telluric_spectrum == []: #If user does not specifiy a telluric spectrum directly
-					telluric_flux = std_flattened.orders[i].flux #Use the flatteneed standard flux given by the PLP, used for scaling telluric lines
-				else: #But if the user does specify a telluric spectrum object
-					telluric_flux = telluric_spectrum.orders[i].flux #use that object given by the user instead 
-				interpolated_a0v_synth_spec = a0v_synth_spec(waves) #Grab synthetic A0V spectrum across current order
-				if calibration != []: #If user specifies they are using their own calibration: WARNING FOR TESTING PURPOSES ONLY
-					relative_flux_calibration = calibration.orders[i].flux #Then use the calibration given by the user
-				else: #Or else use the default calibration
-					#relative_flux_calibration = (std_flux * (telluric_flux**(telluric_power-1.0))/ interpolated_a0v_synth_spec)				
-					relative_flux_calibration = std_flux / interpolated_a0v_synth_spec
-				clf() #Clear plot
-				plot(waves, std_flux, color='red') #Plot observed A0V order
-				plot(waves, std_flux * (a0v_synth_cont(waves)/interpolated_a0v_synth_spec), color='black')  #Plot A0V continuum (with H I lines corrected via synthetic A0V spectrum)
-				plot(waves, std_flux / std_flattened.orders[i].flux, color='blue')
-				#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2)  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-				s2n =  1.0/sqrt((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-				if not no_flux: #As long as user does not specify doing a flux calibration
-					sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-				sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
-				pdf.savefig()
-	else: #If user does not specifiy savecheck then just run code without saving pdfs
-		for i in xrange(std.n_orders): #Loop through each order
-			if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
-				std.orders[i].flux[std_flattened.orders[i].flux <= .1] = nan
-			waves = std.orders[i].wave #Std wavelengths
-			std_flux = std.orders[i].flux #Std flux
-			if telluric_spectrum == []: #If user does not specifiy a telluric spectrum directly
-				telluric_flux = std_flattened.orders[i].flux #Use the flatteneed standard flux given by the PLP, used for scaling telluric lines
-			else: #But if the user does specify a telluric spectrum object
-				telluric_flux = telluric_spectrum.orders[i].flux #use that object given by the user instead 
-			interpolated_a0v_synth_spec = a0v_synth_spec(waves)
-			if calibration != []: #If user specifies they are using their own calibration: WARNING FOR TESTING PURPOSES ONLY
-				relative_flux_calibration = calibration.orders[i].flux #Then use the calibration given by the user
-			else: #Or else use the default calibration
-				#relative_flux_calibration = (std_flux * (telluric_flux**(telluric_power-1.0))/ interpolated_a0v_synth_spec)
-				relative_flux_calibration = std_flux / interpolated_a0v_synth_spec
-			#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-			s2n =  1.0/sqrt((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2)) #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-			if not no_flux: #As long as user does not specify doing a flux calibration
-				sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
-			sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+	for i in xrange(std.n_orders): #Loop through and plot each order for the observed A0V, along with the corrected H I absorption to see how well the synthetic A0V spectrum fits
+		if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
+			std.orders[i].flux[std_flattened.orders[i].flux <= .1] = nan #Mask out bad pixels
+		waves = std.orders[i].wave #Std wavelengths
+		std_flux = std.orders[i].flux #Std flux
+		if telluric_spectrum == []: #If user does not specifiy a telluric spectrum directly
+			telluric_flux = std_flattened.orders[i].flux #Use the flatteneed standard flux given by the PLP, used for scaling telluric lines
+		else: #But if the user does specify a telluric spectrum object
+			telluric_flux = telluric_spectrum.orders[i].flux #use that object given by the user instead 
+		interpolated_a0v_synth_spec = a0v_synth_spec(waves) #Grab synthetic A0V spectrum across current order
+		if calibration != []: #If user specifies they are using their own calibration: WARNING FOR TESTING PURPOSES ONLY
+			relative_flux_calibration = calibration.orders[i].flux #Then use the calibration given by the user
+		else: #Or else use the default calibration
+			#relative_flux_calibration = (std_flux * (telluric_flux**(telluric_power-1.0))/ interpolated_a0v_synth_spec)				
+			relative_flux_calibration = std_flux / interpolated_a0v_synth_spec
+		#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2)  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+		s2n =  1.0/sqrt((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+		if not no_flux: #As long as user does not specify doing a flux calibration
+			sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
+		sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
@@ -941,7 +954,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 #The idea is that the user can call a single line and get a single spectrum ready to go
 def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
 		twodim=True, usestd=True, no_flux=False, make_1d=False, median_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
-		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False):
+		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False, std_shift=0.0):
 	if usestd:
 		#Make 1D spectrum object for standard star
 		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
@@ -982,6 +995,37 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
 	if oh != 0: #If user specifies a sky correction image number
 		oh1d = getspec(date, waveno, oh, oh, usestd=False, median_1d=True, twodim=False) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?)
+		if (oh_scale == 0.0) or (oh_scale == [0.0,0.0]): #If scale is not specified by user find it automatically, along with flexure, independently for H and K bands
+			oh1d.combine_orders() #Combine OH sky difference orders so we can examine the entire H and K bands
+			sci_obj = copy.deepcopy(sci1d_obj) #Make copy of science 1D object so we don't accidently modify the original data
+			sci_obj.combine_orders() #Combine the science data orders
+			oh_flux = oh1d.combospec.flux #Grab OH sky difference 1D flux
+			flux = sci_obj.combospec.flux #Grab science 1D flux
+			g = Gaussian1DKernel(stddev=20) #Prepare to smooth the OH sky difference data to find where there are OH residuals and where there are none
+			oh_smoothed = abs(convolve(oh_flux,g)) #Smooth OH sky difference frame
+			oh_smoothed = oh_smoothed / nanmax(oh_smoothed) #Normalize to brightest OH residual
+			oh_mask = oh_smoothed > 0.05 #Find all the smoothed OH sky difference residuals above 1/20th the brightness of the smoothed brightest residual
+			g = Gaussian1DKernel(stddev=200) #Prepare to smooth the science data to zero out any continuum
+			flux = flux - convolve(flux, g) #Subtract a crude fit to the continuum so that most of the OH residuals start around 0 flux
+			flex = arange(-2.0, 2.0, 0.05) #Range of flexure shifts to test
+			scales = arange(-2,2,0.01) #Range of OH scales to test
+			in_h_band = (sci_obj.combospec.wave < 1.85) & oh_mask #Find only pixels in the H band and near an OH residual
+			in_k_band = (sci_obj.combospec.wave > 1.85) & oh_mask #Find only pixels in the K band and near an OH residual
+			h_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for h band
+			k_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for k band
+			for i in xrange(len(scales)): #Loop through each possible scaling of the OH residuals
+				for k in xrange(len(flex)): #Look through each possible flexure value of the OH residuals
+					tweaked_oh =  flexure(oh_flux*scales[i], flex[k]) #Apply the flexure and scaling to the OH sky difference residuals
+					diff = (flux - tweaked_oh) #Subtract the tweaked OH sky difference residuals from the residuals in the science flux
+					h_store_chi_sq[i,k] = nansum((diff[in_h_band])**2) #Calculate chisq for H band
+					k_store_chi_sq[i,k] = nansum((diff[in_k_band])**2) #Calculate chisq for K band
+			best_h_band_indicies = where(h_store_chi_sq == flat_nanmin(abs(h_store_chi_sq))) #Find best fit by findinging the minimum chisq in the H band
+			best_k_band_indicies = where(k_store_chi_sq == flat_nanmin(abs(k_store_chi_sq))) #Find best fit by findinging the minimum chisq in the K band
+			oh_scale = [scales[best_h_band_indicies[0][0]], scales[best_k_band_indicies[0][0]]] #Save OH scaling best fit
+			oh_flexure = [flex[best_h_band_indicies[1][0]], flex[best_k_band_indicies[1][0]]] #Save OH flexure best fit
+			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
+			print 'OH residual scaling found to be: ', oh_scale
+			print 'OH residual flexure found to be: ', oh_flexure
 		if oh_flexure != 0.: #If user specifies a flexure correction
 			if size(oh_flexure) == 1: #If the correction is only one number, correct all orders
 				for i in xrange(sci1d_obj.n_orders): #Loop through each order
@@ -995,45 +1039,39 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 						flexure_index = 1
 					oh1d.orders[i].flux = flexure(oh1d.orders[i].flux, oh_flexure[flexure_index]) #Apply flexure correction to 1D array
 					#oh2d.orders[i].flux = flexure(oh1d.orders[i].flux, oh_flexure[flexure_index]) #Apply flexure correction to 2D array
-		if oh_scale == 0.0: #If scale is not specified by user find it automatically (tests so far are promising)
-			#Test automated minimization routine
-			scales = arange(-2,2,0.01)
-			store_chi_sq = zeros(len(scales))
-			for i in xrange(len(scales)):
-				chi_sq = 0.
-				for j in xrange(sci1d_obj.n_orders):
-					weights = oh1d.orders[j].flux
-					diff = sci1d_obj.orders[j].flux - (oh1d.orders[j].flux * scales[i])
-					#print 'order ', j ,' gives chisq = ', chi_sq
-					store_chi_sq[i] += nansum((diff*weights)**2)
-			oh_scale = scales[store_chi_sq == flat_nanmin(abs(store_chi_sq))][0]
-			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
-			print 'OH residual scaling found to be: ', oh_scale
 		if size(oh_scale) == 1: #if user specifies only one oh scale for the h and k band, use the same scale in both bands, else use the scale for each band seperately if the user provides two oh_scales
 			oh_scale = [oh_scale, oh_scale]
 		if savechecks: #If user specifies to save checks as a pdf
 			with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
 				clf()
 				for i in xrange(sci1d_obj.n_orders): #Save whole spectrum at once
-					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data')
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data')
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data')
+					if i==0:
+						legend(loc='upper right', fontsize=9) #Only plot legend for first set 
 				xlabel('$\lambda$ [$\mu$m]')
 				ylabel('Relative Flux')
+				title('Check whole spectrum')
+				tight_layout()
 				pdf.savefig()
 				for i in xrange(sci1d_obj.n_orders): #Then save each order for closer inspection
 					clf()
-					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red')
-					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black')
+					#()
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data')
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data')
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data')
 					xlabel('$\lambda$ [$\mu$m]')
 					ylabel('Relative Flux')
+					legend(loc='upper right',fontsize=9)
+					title('Check invdividual orders')
+					tight_layout()
 					pdf.savefig()
 		for i in xrange(sci1d_obj.n_orders):
 			if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
@@ -1046,7 +1084,6 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			# if twodim: #If user specifies a two dimensional object
 			# 	#sci2d_obj.orders[i].flux = sci2d_obj.orders[i].flux - tile(nanmedian(oh2d.orders[i].flux, 0), [slit_length,1]) * oh_scale
 			# 	sci2d_obj.orders[i].flux -= nanmedian(oh2d.orders[i].flux, 0) * use_oh_scale
-
 	#Apply telluric correction & relative flux calibration
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
@@ -1079,7 +1116,13 @@ def makespec(date, band, waveno, frameno, std=False, twodim=False, mask_cosmics=
 	try: #Try reading in new wavelength data from A0V
 		wave_data = fits_file(date, waveno, band, wave=True) #If 1D, read in data from wavelength solution
 	except: #If it does not exist, try reading in wavelength data the old way (from the calib directory)
-		wave_data = fits_file(date, waveno, band, wave_old=True) #If 1D, read in data from wavelength solution
+		try: #Try reading in fits file
+			wave_data = fits_file(date, waveno, band, wave_old=True) #If 1D, read in data from wavelength solution
+		except: #If no fits file is found, try reading in json file instead
+			filename = calib_path+str(date)+'/SDC'+band+'_'+str(date)+'_'+'%.4d' % int(frameno) +'.wvlsol_v0.json' #Set json file name
+			with open(filename) as data_file:  #Read in Json file
+			    data = json.load(data_file)
+			wave_data = data['wvl_sol'] #Splice out the wavelength solution
 	if twodim: #If spectrum is 2D but no variance data to be read in
 		var_data = fits_file(date, frameno, band, var2d=True) #Grab data for 2D variance cube
 		spec_obj = spec2d(wave_data, spec_data, fits_var=var_data, mask_cosmics=mask_cosmics, interpolate_slit=interpolate_slit) #Create 2D spectrum object, with variance data inputted to get S/N
@@ -1150,7 +1193,10 @@ class fits_file:
 #Class to store and analyze a 1D spectrumc
 class spec1d:
 	def __init__(self, fits_wave, fits_spec, fits_var):
-		wavedata = fits_wave.get() #Grab fits data for wavelength out of object
+		try: #First try to see if the wavelength data is from a fits file
+			wavedata = fits_wave.get() #Grab fits data for wavelength out of object, first try as if it were a fits object
+		except: #If it is not a fits object, say something read out of a json file..
+			wavedata = array(fits_wave) #Just copy over the data and get on with it
 		specdata = fits_spec.get() #Grab fits data for flux out of object
 		vardata = fits_var.get() #Grab fits data for variance
 		orders = [] #Set up empty list for storing each orders
@@ -1409,7 +1455,10 @@ class spec1d:
 #Class to store and analyze a 2D spectrum
 class spec2d:
 	def __init__(self, fits_wave, fits_spec, fits_var=[], mask_cosmics=False, interpolate_slit=False):
-		wavedata = fits_wave.get() #Grab fits data for wavelength out of object
+		try: #First try to see if the wavelength data is from a fits file
+			wavedata = fits_wave.get() #Grab fits data for wavelength out of object, first try as if it were a fits object
+		except: #If it is not a fits object, say something read out of a json file..
+			wavedata = array(fits_wave) #Just copy over the data and get on with it		spec2d = fits_spec.get() #grab all fits data
 		spec2d = fits_spec.get() #grab all fits data
 		var2d = fits_var.get() #Grab all variance data from fits file
 		n_orders = fits_spec.n_orders

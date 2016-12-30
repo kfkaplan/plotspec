@@ -756,52 +756,53 @@ class h2_transitions:
 		residuals = e**(log_N-y)
 		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[17.0,10.5], x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), ratio_y_range=[1e-1,1e1],
+	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[17.0,13], x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), ratio_y_range=[1e-1,1e1],
 		plot_residual_temp=False, residual_temp=default_single_temp, residual_temp_y_intercept=default_single_temp_y_intercept, multi_temp_fit=False,
-		take_ratio=False, s2n_cut=3.0): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
+		take_ratio=False, s2n_cut=3.0, makeplot=True): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
 		fname = self.path + '_'+name+'.pdf'
-		with PdfPages(fname) as pdf: #Make a pdf
-			show_these_v  = [] #Set up a blank vibration array to automatically fill 
-			for v in xrange(14): #Loop through and check each set of states of constant v
-				if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
-					show_these_v.append(v) #store this vibration state for later plotting
-			ratio = copy.deepcopy(self)
-			if take_ratio: #If user actually wants to take a ratio
-				ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
-				ratio.Nsigma = self.Nsigma  /  h2_model.N
-				chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
-				print 'Compare model for ' + name + ' sum(log10(ratios)**2) = ', chi_sq
-			else: #If user doesn ot specifiy acutally taking a ratio
-				ratio.N = self.N - h2_model.N
-				ratio.Nsigma = self.Nsigma
-			#ratio.Nsigma = (self.Nsigma /h2_model.N)
-			### Set up subplotting
-			subplots(2, sharex="col") #Set all plots to share the same x axis
-			tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
-			fig = gcf()#Adjust aspect ratio
-			fig.set_size_inches(figsize) #Adjust aspect ratio
-			subplots_adjust(hspace=0.037, wspace=0) #Set all plots to have no space between them vertically
-			gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
-			### Left side
-			subplot(gs[0])
-			h2_model.v_plot(V=show_these_v, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
-			self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut)
-			ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
-			V = range(1,14)
-			frame = gca() #Turn off axis number labels
-			setp(frame.get_xticklabels(), visible=False)
-			#subplot(gs[3])
-			subplot(gs[1])
-			plot([0,100000],[1,1], linestyle='--', color='gray')
-			ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True,
-				plot_single_temp=plot_residual_temp, single_temp=residual_temp, single_temp_y_intercept=residual_temp_y_intercept, multi_temp_fit=multi_temp_fit, show_ratio=True, s2n_cut=s2n_cut, y_range=ratio_y_range)
-			if take_ratio:
-				#ylabel("Data/Model ratio  ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)", fontsize=18)
-				ylabel("Data/Model Ratio", fontsize=18)
-			else:
-				ylabel("Data-Model  ln((N$_u$-$N_m$)/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
-			xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
-			pdf.savefig()
+		show_these_v  = [] #Set up a blank vibration array to automatically fill 
+		for v in xrange(14): #Loop through and check each set of states of constant v
+			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
+				show_these_v.append(v) #store this vibration state for later plotting
+		ratio = copy.deepcopy(self)
+		if take_ratio: #If user actually wants to take a ratio
+			ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
+			ratio.Nsigma = self.Nsigma  /  h2_model.N
+			chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
+			print 'Compare model for ' + name + ' sum(log10(ratios)**2) = ', chi_sq
+		else: #If user doesn ot specifiy acutally taking a ratio
+			ratio.N = self.N - h2_model.N
+			ratio.Nsigma = self.Nsigma
+		#ratio.Nsigma = (self.Nsigma /h2_model.N)
+		if makeplot:
+			with PdfPages(fname) as pdf: #Make a pdf
+				### Set up subplotting
+				subplots(2, sharex="col") #Set all plots to share the same x axis
+				tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
+				fig = gcf()#Adjust aspect ratio
+				fig.set_size_inches(figsize) #Adjust aspect ratio
+				subplots_adjust(hspace=0.037, wspace=0) #Set all plots to have no space between them vertically
+				gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
+				### Left side
+				subplot(gs[0])
+				h2_model.v_plot(V=show_these_v, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
+				self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut)
+				ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+				V = range(1,14)
+				frame = gca() #Turn off axis number labels
+				setp(frame.get_xticklabels(), visible=False)
+				#subplot(gs[3])
+				subplot(gs[1])
+				plot([0,100000],[1,1], linestyle='--', color='gray')
+				ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True,
+					plot_single_temp=plot_residual_temp, single_temp=residual_temp, single_temp_y_intercept=residual_temp_y_intercept, multi_temp_fit=multi_temp_fit, show_ratio=True, s2n_cut=s2n_cut, y_range=ratio_y_range)
+				if take_ratio:
+					#ylabel("Data/Model ratio  ln(N$_u$/g$_u$)-ln(N$_{m}$/g$_{m}$)", fontsize=18)
+					ylabel("Data/Model Ratio", fontsize=18)
+				else:
+					ylabel("Data-Model  ln((N$_u$-$N_m$)/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+				xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
+				pdf.savefig()
 		return(chi_sq) #Return chisq value to quantify the goodness of fit
 
 
@@ -942,7 +943,7 @@ class h2_transitions:
 			nonzero = self.N != 0.0
 			if clear: #User can specify if they want to clear the plot
 				clf()
-			symbsize = 7 #Size of symbols on excitation diagram
+			symbsize = 9 #Size of symbols on excitation diagram
 			labelsize = 18 #Size of text for labels
 			if orthopara_fill:  #User can specify how they want symbols to be filled
 				orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
@@ -1008,7 +1009,7 @@ class h2_transitions:
 						use_label = '_nolegend_'
 					else:
 						use_label = ' '
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				ortho = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for ortho-H2, which has the proton spins aligned so J can only be odd (1,3,5...)
 				ortho_upperlimit = (self.J.u % 2 == 1) &  (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.)  #Select ortho-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(ortho): #If datapoints are found...
@@ -1016,9 +1017,9 @@ class h2_transitions:
 						plot(self.T[ortho], log_N[ortho], current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
 						y_error_bars = [minus_one_sigma[ortho], plus_one_sigma[ortho]] #Calculate upper and lower ends on error bars
-						errorbar(self.T[ortho], log_N[ortho], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						errorbar(self.T[ortho], log_N[ortho], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2,uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N[ortho])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
@@ -1054,7 +1055,7 @@ class h2_transitions:
 						use_label = '_nolegend_'
 					else:
 						use_label = 'v='+str(i)
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=use_label, capthick=3, elinewidth=2, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 				para = (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Select only states for para-H2, which has the proton spins anti-aligned so J can only be even (0,2,4,...)
 				para_upperlimit =  (self.J.u % 2 == 0) & (self.V.u == i) & (self.s2n <= s2n_cut) & (self.N > 0.) #Select para-H2 lines where there is no detection (e.g. S/N <= 1)
 				if any(para): #If datapoints are found...
@@ -1063,9 +1064,9 @@ class h2_transitions:
 					else:
 						y_error_bars = [minus_one_sigma[para], plus_one_sigma[para]] #Calculate upper and lower ends on error bars
 						#errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
-						errorbar(self.T[para], log_N[para], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						errorbar(self.T[para], log_N[para], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2,markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N[para])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
@@ -1179,15 +1180,15 @@ class h2_transitions:
 						plot(self.J.u[ortho], log_N, current_symbol,  color=current_color, label=' ', markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log((self.N[ortho]-self.Nsigma[ortho])/self.g[ortho])), abs(log_N - log((self.N[ortho]-self.Nsigma[ortho])/self.g[ortho]))] #Calculate upper and lower ends on error bars
-						errorbar(self.J.u[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
+						errorbar(self.J.u[ortho], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label=' ', capthick=3, elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.J.u[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0/self.g[ortho_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.J.u[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0/self.g[ortho_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					#print 'For ortho v=', i
 				else: #Else if no datapoints are found...
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3,  elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				
 			for i in use_upper_v_states:
 				if nocolor: #If user specifies no color,
@@ -1204,15 +1205,15 @@ class h2_transitions:
 						plot(self.J.u[para], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log((self.N[para]-self.Nsigma[para])/self.g[para])), abs(log_N - log((self.N[para]-self.Nsigma[para])/self.g[para]))] #Calculate upper and lower ends on error bars
-						errorbar(self.J.u[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
+						errorbar(self.J.u[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, elinewidth=2, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.J.u[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0/self.g[para_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.J.u[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0/self.g[para_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.J.u[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					#print 'For para v=', i					
 				else: #Else if no datapoints are found...
-					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
+					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, elinewidth=2, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 			tick_params(labelsize=14) #Set tick mark label size
 			if normalize: #If normalizing to the 1-0 S(1) line
 				ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
@@ -1265,9 +1266,9 @@ class h2_transitions:
 						plot(self.V.u[found], log_N, current_symbol,  color=current_color, label='v='+str(i), markersize=symbsize, fillstyle=fill)  #Plot data + error bars
 					else:
 						y_error_bars = [abs(log_N - log((self.N[found]-self.Nsigma[found])/self.g[found]) ), abs(log_N - log((self.N[found]-self.Nsigma[found])/self.g[found]) )] #Calculate upper and lower ends on error bars
-						errorbar(self.V.u[found], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='J='+str(i), capthick=3, markersize=symbsize, fillstyle=fill)  #Plot data + error bars
+						errorbar(self.V.u[found], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='J='+str(i), capthick=3, elinewidth=2, markersize=symbsize, fillstyle=fill)  #Plot data + error bars
 						if show_upper_limits:
-							test = errorbar(self.V.u[upperlimit], log(self.Nsigma[upperlimit]*3.0/self.g[upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, uplims=True, markersize=symbsize, fillstyle=fill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
+							test = errorbar(self.V.u[upperlimit], log(self.Nsigma[upperlimit]*3.0/self.g[upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=fill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in xrange(len(log_N)): #Loop through each point to label
 							text(self.V.u[found][j], log_N[j], '        '+self.label[found][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
