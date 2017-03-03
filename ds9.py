@@ -55,3 +55,4 @@ def show(fits_file, new = False):
   set('fits '+ fits_file) #open fits file
   set('scale log') #Set view to log scale
   set('scale Zscale') #Set scale limits to Zmax, looks okay
+

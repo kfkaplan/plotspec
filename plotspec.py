@@ -22,7 +22,7 @@ import copy #Allow objects to be copied
 from scipy.ndimage.filters import median_filter #For cosmic ray removal
 from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
-ion() #Turn on interactive plotting for matplotlib
+#ion() #Turn on interactive plotting for matplotlib
 from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
@@ -33,10 +33,11 @@ from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with
 
 
 #Global variables user should set
-#pipeline_path = '/media/kfkaplan/IGRINS_Data/plp/' #Paths for running on linux laptop
+pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
+save_path = '/Volumes/IGRINS_Data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
-pipeline_path = '/Volumes/IGRINS_data/plp/'
-save_path = '/Volumes/IGRINS_data/results/' #Define path for saving temporary files'
+#pipeline_path = '/Volumes/IGRINS_data_Backup/plp/'
+#save_path = '/Volumes/IGRINS_data_Backup/results/' #Define path for saving temporary files'
 scratch_path = save_path + 'scratch/' #Define a scratch path for saving some temporary files
 if not os.path.exists(scratch_path): #Check if directory exists
 	print 'Directory '+ scratch_path + ' does not exist.  Making new directory.'
@@ -49,7 +50,7 @@ set_velocity_res = 1.0 #Resolution of velocity grid
 slit_length = 61 #Number of pixels along slit in both H and K bands
 block = 750 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
 cosmic_horizontal_mask = 3 #Number of pixels to median smooth horizontally (in wavelength space) when searching for cosmics
-cosmic_horizontal_limit  = 2.2 #Number of times the data must be above it's own median smoothed self to find cosmic rays
+cosmic_horizontal_limit  = 10.0 #Number of times the data must be above it's own median smoothed self to find cosmic rays
 cosmic_s2n_min = 2.5 #Minimum S/N needed to flag a pixel as a cosmic ray
 
 #Global variables, should remain untouched
@@ -77,10 +78,10 @@ def contour_plot(x, y, z, nx=100, ny=100, levels=[3.,4.,5.,6.,7.,8.,9.,10.,15.,2
 	#imshow(zi, vmin=z_range[0], vmax=z_range[1], origin='lower',
     #       extent=[xmin, xmax, ymin, ymax], aspect='auto')
 	#colorbar()
-	scatter(x, y, color='grey')
+	scatter(x, y, color='grey', s=7)
 	cs = contour(xi,yi,zi, levels=levels, colors='black')
 	clabel(cs, inline=1, fontsize=12, fmt='%1.0f')
-	scatter(x, y, color='grey')
+	#scatter(x, y, color='grey')
 
 #~~~~~~~~~~~~~~~~~~~~~~~~Code for storing information on saved data directories under save_path~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class save_class: #Class stores information on what path to save files to
@@ -352,45 +353,87 @@ class position_velocity:
 					save_shift_v[find_line] = shift_v[i] #Save velocity shift
 					save_shift_wave[find_line] = show_lines.wave[find_line] - pre_shfited_wavelength #save wavelength shift
 				#print shift_labels[i]
-				#stop()
-		
 		for i in xrange(n_lines): #Label the lines
-			pv_velocity = c * ( (spec2d.wave / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
+			pv_velocity = c * ( (wave_pixels / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
+			#dv_dl = velocity_res / ungridded_velocities
 			pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
+			ungridded_wavelengths = wave_pixels[pixel_cut]
 			ungridded_velocities = pv_velocity[pixel_cut]
 			ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
 			ungridded_flux_2d = spec2d.flux[:,pixel_cut] #PV diagram ungridded on origional pixels			
 			ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
 			ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
+			interp_wave = interp1d(ungridded_velocities, ungridded_wavelengths, kind='linear', bounds_error=False) #Create interp obj for wavelengths
 			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
 			interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
-			gridded_flux_2d = interp_flux_2d(interp_velocity) #PV diagram velocity gridded	
-			gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
+			gridded_wavelengths = interp_wave(interp_velocity) #Get wavelengths as they appear on the velocity grid
+			dl_dv = gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1] / set_velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
+			dl_dv = hstack([dl_dv, dl_dv[len(dl_dv)-1]]) #Add an extra thing at the end of the delta-lambda/delta-velocity array so that it has an equal number of elements as everything else here
+ 			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
+			gridded_variance_2d = interp_variance_2d(interp_velocity) * dl_dv**2 #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
-				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d)
-				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d)
+				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv
+				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * dl_dv**2
 			else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
-				gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
-				gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
-			if any(isfinite(ungridded_flux_2d)) and any(isfinite(gridded_flux_2d)): #Check if everything near line is nan, if so skip over this code to avoid bug
-				scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-				scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-				scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-				scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-			else:
-				scale_flux_1d = 1.0
-				scale_flux_2d = 1.0
-				scale_variance_1d = 1.0
-				scale_variance_2d = 1.0
-			gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
-			gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
-			gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
-			gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
-			flux[i,:] = gridded_flux_1d *  scale_flux_1d #Append 1D flux array with line
-			var1d[i,:] = gridded_variance_1d * scale_flux_1d #Append 1D variacne array with line
-			pv[i,:,:] = gridded_flux_2d * scale_flux_2d #Stack PV spectrum of lines into a datacube
-			var2d[i,:,:] = gridded_variance_2d * scale_variance_2d  #Stack PV variance of lines into a datacube
-			#Filter out really bad pixels, can change max_good_pixels if necessary
+				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d, 0) * dl_dv**2 #Create 1D variance spectrum by collapsing 2D variance
+			# if any(isfinite(ungridded_flux_2d)) and any(isfinite(gridded_flux_2d)): #Check if everything near line is nan, if so skip over this code to avoid bug
+			# 	scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+			# 	scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+			# 	scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
+			# 	scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
+			# else:
+			# 	scale_flux_1d = 1.0
+			# 	scale_flux_2d = 1.0
+			# 	scale_variance_1d = 1.0
+			# 	scale_variance_2d = 1.0
+			# gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
+			# gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
+			# gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
+			# gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
+			flux[i,:] = gridded_flux_1d# *  scale_flux_1d #Append 1D flux array with line
+			var1d[i,:] = gridded_variance_1d# * scale_flux_1d #Append 1D variacne array with line
+			pv[i,:,:] = gridded_flux_2d# * scale_flux_2d #Stack PV spectrum of lines into a datacube
+			var2d[i,:,:] = gridded_variance_2d# * scale_variance_2d  #Stack PV variance of lines into a datacube
+			#stop()
+		# BACKUP FLUX REGRIDDING FROM WAVELENGTH TO VELOCITY SPACE, OLD WAY APPEARS TO HAVE WEIRD GLITCHES SO TRYING A NEW METHOD, DELETE BELOW WHEN NEW METHOD PROVES TO WORK
+		# for i in xrange(n_lines): #Label the lines
+		# 	pv_velocity = c * ( (spec2d.wave / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
+		# 	pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
+		# 	ungridded_velocities = pv_velocity[pixel_cut]
+		# 	ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
+		# 	ungridded_flux_2d = spec2d.flux[:,pixel_cut] #PV diagram ungridded on origional pixels			
+		# 	ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
+		# 	ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
+		# 	interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
+		# 	interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
+		# 	gridded_flux_2d = interp_flux_2d(interp_velocity) #PV diagram velocity gridded	
+		# 	gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
+		# 	if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
+		# 		gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d)
+		# 		gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d)
+		# 	else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
+		# 		gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
+		# 		gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
+		# 	if any(isfinite(ungridded_flux_2d)) and any(isfinite(gridded_flux_2d)): #Check if everything near line is nan, if so skip over this code to avoid bug
+		# 		scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+		# 		scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
+		# 		scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
+		# 		scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
+		# 	else:
+		# 		scale_flux_1d = 1.0
+		# 		scale_flux_2d = 1.0
+		# 		scale_variance_1d = 1.0
+		# 		scale_variance_2d = 1.0
+		# 	gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
+		# 	gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
+		# 	gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
+		# 	gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
+		# 	flux[i,:] = gridded_flux_1d *  scale_flux_1d #Append 1D flux array with line
+		# 	var1d[i,:] = gridded_variance_1d * scale_flux_1d #Append 1D variacne array with line
+		# 	pv[i,:,:] = gridded_flux_2d * scale_flux_2d #Stack PV spectrum of lines into a datacube
+		# 	var2d[i,:,:] = gridded_variance_2d * scale_variance_2d  #Stack PV variance of lines into a datacube
+		# 	#Filter out really bad pixels, can change max_good_pixels if necessary
 		if shift_lines != '': #If lines were shifted, save the velocities and wavlengths that were shifted in this PV object
 			self.shift_v = save_shift_v
 			self.shift_wave = save_shift_wave
@@ -648,9 +691,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		mask_shift =  zeros(len(line_wave)) #Array to store shift (in pixels) of mask for s2n mask fitting
 		pv_data = pv.pv #Holder for flux datacube
 		pv_variance = pv.var2d #holder for variance datacube
-		bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through
-		pv_data[bad_data] == nan
-		pv_variance[bad_data] == nan
+		#bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through, commented out for now since it doesn't seem to help with anything
+		#pv_data[bad_data] = nan
+		#pv_variance[bad_data] = nan
 		pv_shape = shape(pv_data[0,:,:]) #Read out shape of a 2D slice of the pv diagram cube
 		n_lines = len(pv_data[:,0,0]) #Read out number of lines
 		velocity_range = [flat_nanmin(pv.velocity), flat_nanmax(pv.velocity)]
@@ -734,6 +777,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
 				line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+				print 'i = ', i
+				print 'nansum(on_data) = ', nansum(on_data)
+				print 'background = ', background
 			elif optimal_extraction: #Okay if the user specifies to use optimal extraction now that we know how the weights have been shifted to maximize S/N
 				background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
 				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
@@ -1007,8 +1053,8 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			oh_mask = oh_smoothed > 0.05 #Find all the smoothed OH sky difference residuals above 1/20th the brightness of the smoothed brightest residual
 			g = Gaussian1DKernel(stddev=200) #Prepare to smooth the science data to zero out any continuum
 			flux = flux - convolve(flux, g) #Subtract a crude fit to the continuum so that most of the OH residuals start around 0 flux
-			flex = arange(-2.0, 2.0, 0.05) #Range of flexure shifts to test
-			scales = arange(-2,2,0.01) #Range of OH scales to test
+			flex = arange(-4.0, 4.0, 0.05) #Range of flexure shifts to test
+			scales = arange(-4.0,4.0,0.01) #Range of OH scales to test
 			in_h_band = (sci_obj.combospec.wave < 1.85) & oh_mask #Find only pixels in the H band and near an OH residual
 			in_k_band = (sci_obj.combospec.wave > 1.85) & oh_mask #Find only pixels in the K band and near an OH residual
 			h_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for h band
@@ -1070,7 +1116,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 					xlabel('$\lambda$ [$\mu$m]')
 					ylabel('Relative Flux')
 					legend(loc='upper right',fontsize=9)
-					title('Check invdividual orders')
+					title('Check individual orders')
 					tight_layout()
 					pdf.savefig()
 		for i in xrange(sci1d_obj.n_orders):
@@ -1477,6 +1523,14 @@ class spec2d:
 			#nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			nx, ny, nz = shape(spec2d)
+			zero_mask = zeros([ny,nz]) #Find any bad pixels/Cosmic-rays zeroed out by PLP
+			zero_mask[spec2d[i,:,:]==0.] = 1.0
+			zero_mask[roll(spec2d[i,:,:],1,axis=0)==0.] = 1.0 #...along with adjacent pixels...
+			zero_mask[roll(spec2d[i,:,:],-1,axis=0)==0.] = 1.0
+			zero_mask[roll(spec2d[i,:,:],1,axis=1)==0.] = 1.0
+			zero_mask[roll(spec2d[i,:,:],-1,axis=1)==0.] = 1.0
+			spec2d[i,:,:][zero_mask==1.0] = nan #...and turn them into nans, so I don't accidently subtract flux during continuum subtraction (and other possible glitches)
+			var2d[i,:,:][zero_mask==1.0] = nan 
 			if interpolate_slit: #If user specifies interpoalting the, do that
 				data2d = regrid_slit(spec2d[i,:,:]) 
 				noise2d = regrid_slit(sqrt(var2d[i,:,:]))
@@ -1738,7 +1792,16 @@ class spec2d:
 	# 		s2n = self.orders[i].flux / total_noise
 	# 		s2n_obj.orders[i].flux = s2n
 	# 	return s2n_obj 
-
+	def deredden(self, A_V): #Deredden spectrum with an assumed A_V, and the extinction curve from Rieke & Lebofsky (1985) Table 3 (see "redden" definition)
+		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
+			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			self.combine_orders() #If combined spectrum does not exist, combine the orders 
+		R = 3.09 #Assume a Milky way like dust
+		E_BV = (-A_V) / R #Calcualte reverse E_BV, by taking the negative of the known A_V
+		V = 0. #For dereddening, we reverse redden everything, assuming V mag =0
+		B = E_BV #and assuming B mag is the difference between V and B magnitudes E(B-V)
+		self.combospec.flux = redden(B, V, self.combospec.wave, self.combospec.flux) #Artificially deredden flux
+		self.combospec.noise = redden(B, V, self.combospec.wave, self.combospec.noise) #Artificially scale noise to match S/N of dereddened flux
 
 
 

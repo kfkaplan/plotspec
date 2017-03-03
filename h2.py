@@ -21,8 +21,8 @@ lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction
 wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
-#cloudy_dir = '/Users/kfkaplan/Dropbox/cloudy/'
 cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
+#cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
 cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -314,6 +314,9 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 
 #Test printing intrinsic ratios, for debugging/diagnosing extinction
 def test_intrinsic_ratios(transitions):
+	A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+	l = array([ 0.806,  1.22 ,  1.63 ,  2.19 ,  3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+	extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
 	clf()
 	n_doubles_found = 0 #Count doubles (pair from same upper state)
 	n_trips_found = 0 #Count trips
@@ -340,6 +343,7 @@ def test_intrinsic_ratios(transitions):
 				#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
 				ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
 				print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+				print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1]))
 				plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
 				lines_found.append(labels[0]) #Store line labels of lines found
 				lines_found.append(labels[1])
@@ -354,6 +358,7 @@ def test_intrinsic_ratios(transitions):
 					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
 					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1]))
 					plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
 
 				#Pair 2
@@ -363,6 +368,7 @@ def test_intrinsic_ratios(transitions):
 					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[2])
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[2])
 					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[2]))
 					plot([waves[0],waves[2]], [ratio_of_ratios[0], 1.])
 				#Pair 3
 					print 'For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':'
@@ -370,6 +376,7 @@ def test_intrinsic_ratios(transitions):
 					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[1], labels[2])
 					ratio_of_ratios = transitions.flux_ratio(labels[1], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[1], labels[2])
 					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[1])-extinction_curve(waves[2]))
 					plot([waves[1],waves[2]], [ratio_of_ratios[0], 1.])
 				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
 					n_trips_found += 1
