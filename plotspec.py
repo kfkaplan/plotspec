@@ -33,7 +33,7 @@ from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with
 
 
 #Global variables user should set
-pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
+pipeline_path = '/Volumes/IGRINS_Data/plp-2.2.0-alpha.1/' #Paths for running on linux laptop
 save_path = '/Volumes/IGRINS_Data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
 #pipeline_path = '/Volumes/IGRINS_data_Backup/plp/'
@@ -777,9 +777,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
 				line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
-				print 'i = ', i
-				print 'nansum(on_data) = ', nansum(on_data)
-				print 'background = ', background
+				#print 'i = ', i
+				#print 'nansum(on_data) = ', nansum(on_data)
+				#print 'background = ', background
 			elif optimal_extraction: #Okay if the user specifies to use optimal extraction now that we know how the weights have been shifted to maximize S/N
 				background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
 				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
@@ -1046,6 +1046,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			sci_obj = copy.deepcopy(sci1d_obj) #Make copy of science 1D object so we don't accidently modify the original data
 			sci_obj.combine_orders() #Combine the science data orders
 			oh_flux = oh1d.combospec.flux #Grab OH sky difference 1D flux
+			oh_flux[isinf(oh_flux)] = nan #turn infininte oh values into nan to fix errors
 			flux = sci_obj.combospec.flux #Grab science 1D flux
 			g = Gaussian1DKernel(stddev=20) #Prepare to smooth the OH sky difference data to find where there are OH residuals and where there are none
 			oh_smoothed = abs(convolve(oh_flux,g)) #Smooth OH sky difference frame
@@ -1063,8 +1064,11 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 				for k in xrange(len(flex)): #Look through each possible flexure value of the OH residuals
 					tweaked_oh =  flexure(oh_flux*scales[i], flex[k]) #Apply the flexure and scaling to the OH sky difference residuals
 					diff = (flux - tweaked_oh) #Subtract the tweaked OH sky difference residuals from the residuals in the science flux
+					diff[~isfinite(diff)] = nan #Turn all values for diff that are infinite into nans so the nansum doesn't sum to infinity
 					h_store_chi_sq[i,k] = nansum((diff[in_h_band])**2) #Calculate chisq for H band
 					k_store_chi_sq[i,k] = nansum((diff[in_k_band])**2) #Calculate chisq for K band
+			h_store_chi_sq[h_store_chi_sq==0.] = nan #Nan out zeros to correct error in finding the real minimum chisq
+			k_store_chi_sq[k_store_chi_sq==0.] = nan
 			best_h_band_indicies = where(h_store_chi_sq == flat_nanmin(abs(h_store_chi_sq))) #Find best fit by findinging the minimum chisq in the H band
 			best_k_band_indicies = where(k_store_chi_sq == flat_nanmin(abs(k_store_chi_sq))) #Find best fit by findinging the minimum chisq in the K band
 			oh_scale = [scales[best_h_band_indicies[0][0]], scales[best_k_band_indicies[0][0]]] #Save OH scaling best fit
