@@ -153,6 +153,9 @@ def read_takahashi_uehara_2001_model():
 def multi_temp_func(x,b, c1, c2, c3, T1, T2, T3): #Function of 3 temperatures and coefficients for fitting boltzmann diagrams of gas with multiple thermal components
     return b + log(c1*e**(-x/T1) + c2*e**(-x/T2)+ c3*e**(-x/T3))
 
+def single_temp_func(x,b,T): #Function of a single temperature for fitting noltzmann diagrams for gas with a single thermal component
+	return b - (x/T)
+
 
 def linear_function(x, m, b): #Define a linear function for use with scipy.optimize curve_fit, for fitting rotation temperatures
 	return m*x + b
@@ -939,11 +942,11 @@ class h2_transitions:
 	# 			self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True, show_legend=False) #Plot residuals
 	# 			pdf.savefig()
    	#Make simple plot first showing all the different rotational ladders for a constant V
-   	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, 
+   	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=False, orthopara_fill=True, 
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
-   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_color='none',
-   		show_ratio=False):
+   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_temp_fit=False,
+   		single_color='none', show_ratio=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -1143,11 +1146,31 @@ class h2_transitions:
 				print 'b = ', b 
 				print 'c = ', c 
 				print 'T = ', T
+			if single_temp_fit: #If user specifies they want to do a single temperature fit (ie. for shocks) 
+				goodpix = (self.s2n > s2n_cut) & (self.N > 0.)
+				x = self.T[goodpix]
+				y = log(self.N[goodpix]/self.g[goodpix])
+				vary_y_intercept = 7.0
+				vary_temp = 3000.0
+				guess = array([10.0, 1000.0])
+				upper_bound = guess + array([vary_y_intercept, vary_temp])
+				lower_bound = guess - array([vary_y_intercept, vary_temp])
+				fit, cov = curve_fit(single_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
+				b, T = fit
+				b_err, T_err = sqrt(diag(cov))
+				x = arange(min(x)-1000.0,max(x)+1000.0,0.1)
+				plot(x, b-x/T,'--', color='Black', linewidth=2)
+				print 'Results from temperature fit to Boltzmann diagram data:'
+				print 'b = ', b, ' +/- ', b_err
+				print 'T = ', T, ' +/- ', T_err
+				#stop()
 			#show()
 			draw()
 			if savepdf:
 				pdf.savefig() #Add in the pdf
 			#stop()
+			if single_temp_fit:
+				return T, T_err
 	#Plot 
 	def rotation_plot(self, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, empty_fill =False, full_fill=False,
    				show_labels=False, x_range=[0.,0.], y_range=[0.,0.], show_legend=True, fname='', clear=True, legend_fontsize=14):

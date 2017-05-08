@@ -20,20 +20,20 @@ import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
 from scipy.ndimage.filters import median_filter #For cosmic ray removal
-from astropy.convolution import convolve, Gaussian1DKernel #, Gaussian2DKernel #For smoothing, not used for now, commented out
+from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 #ion() #Turn on interactive plotting for matplotlib
 from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
+#from numba import jit #Import numba for speeding up some definitions, commented out for now since there is a major error importing numba
+from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
+from pylab import size #For some reason size was not working, so I will import it last
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
 	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
-#from numba import jit #Import numba for speeding up some definitions, commented out for now since there is a major error importing numba
-from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
-
 
 #Global variables user should set
-pipeline_path = '/Volumes/IGRINS_Data/plp-2.2.0-alpha.1/' #Paths for running on linux laptop
+pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
 save_path = '/Volumes/IGRINS_Data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
 #pipeline_path = '/Volumes/IGRINS_data_Backup/plp/'
@@ -47,7 +47,7 @@ default_wave_pivot = 0.85 #Scale where overlapping orders (in wavelength space) 
 set_velocity_range =100.0 # +/- km/s for interpolated velocity grid
 set_velocity_res = 1.0 #Resolution of velocity grid
 #slit_length = 62 #Number of pixels along slit in both H and K bands
-slit_length = 61 #Number of pixels along slit in both H and K bands
+slit_length = 100 #Number of pixels along slit in both H and K bands
 block = 750 #Block of pixels used for median smoothing, using iteratively bigger multiples of block
 cosmic_horizontal_mask = 3 #Number of pixels to median smooth horizontally (in wavelength space) when searching for cosmics
 cosmic_horizontal_limit  = 10.0 #Number of times the data must be above it's own median smoothed self to find cosmic rays
@@ -59,6 +59,7 @@ calib_path = pipeline_path + 'calib/primary/'
 OH_line_list = 'OH_Rousselot_2000.dat' #Read in OH line list
 c = 2.99792458e5 #Speed of light in km/s
 half_block = block / 2 #Half of the block used for running median smoothing
+#slit_length = slit_length - 1 #This is necessary to get the proper indexing
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~Make a simple contour plot given three lists~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -148,7 +149,7 @@ def quicklook(arr, pause=False, close=False):
 
 #For interpolating an order (or orders) to a new number of pixels in y direction along the slit, use where the H 
 ##@jit #Fast precompiled function for nanmax for using whole array (no specific axis)
-def regrid_slit(ungridded_spectrum, size=500):
+def regrid_slit(ungridded_spectrum, size=slit_length):
 	len_y, len_x = shape(ungridded_spectrum) #Get x and y shape of ungridded spectrum
 	ungridded_y = arange(len_y) #Get y size of ungridded spectrum
 	gridded_y = arange(size) * (float(len_y)/float(size)) #Get size of gridded y
@@ -186,7 +187,7 @@ def redden(B, V, waves, flux):
 	vega_B = 0.03 #Vega B band mag, from Simbad
 	vega_V = 0.03 #Vega V band mag, from simbad
 	#vega_H = -0.03 #Vega H band magnitude, from Simbad
-	#vega_K = 0.13 #Vega K band magnitude, from Simbad
+	#vega_K = 0.13 #Vega K band magnitude, from Simbaddef
 	#E_HK = (H-K) - (vega_H-vega_K)  #Calculate E(H-K) = (H-K)_observed - (H-K)_intrinsic, intrinsic = Vega in this case
 	E_BV = (B-V) - (vega_B-vega_V)  #Calculate E(B-V) = (B-V)_observed - (B-V)_intrinsic, intrinsic = Vega in this case
 	R = 3.09 #Ratio of total/selective extinction from Rieke & Lebofsky (1985)
@@ -198,6 +199,7 @@ def redden(B, V, waves, flux):
 	#reddened_flux = flux * 10**( -0.4 * (E_HK/(lambda_H**(-alpha)-lambda_K**(-alpha))) * waves**(-alpha) ) #Apply artificial reddening
 	#stop()
 	return reddened_flux
+
 
 #Mask Hydrogen absorption lines in A0V standard star continuum, used during relative flux calibration
 def mask_hydrogen_lines(wave, flux):
@@ -219,9 +221,8 @@ def mask_hydrogen_lines(wave, flux):
 
 
 
-
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[], std_shift=0.0):
+def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, y_power=1.0, y_sharpen=0., wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[], std_shift=0.0):
 	# #Read in Vega Data
 	std.combine_orders() #Combine orders for standard star specturm for later plotting
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
@@ -232,11 +233,40 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega, taken between H I lines in the model spectrum vegallpr25.50000resam5
 	y = [2493670., 1950210., 1584670., 1512410., 1406170. , 1293900., 854857., 706839., 589023., 494054., 417965., 356822., 306391.]
 	interpolate_vega_continuum = interp1d(x, y, kind='cubic', bounds_error=False) #Create interpolation object for Vega continuum defined by coordinates above
-	intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale * (vega_flux / interpolate_vega_continuum(vega_wave)-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
 	interpolated_vega_continuum = interpolate_vega_continuum(waves) #grab interpolated continuum once so dn't have to interpolate it again
-	interpolated_vega_lines =  intepolate_vega_lines(waves) #Grab interpoalted lines once
+	continuum_normalized_vega_flux = vega_flux / interpolate_vega_continuum(vega_wave) #Normalzie synthetic Vega spectrum by its own continuum
+	#interpolate_regular_vega_spectrum = interp1d(vega_wave, 1.0 +  (continuum_normalized_vega_flux-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+	if size(y_scale) == 2 or size(y_power) == 2 or size(y_sharpen) == 2 or size(wave_smooth) == 2: #if there are two sets of inputs for modifying the H I lines in the synthetic Vega spectrum, run twice and average the two together
+		if size(y_scale) == 1: y_scale = [y_scale, y_scale] #If there is only one input for these parameters, just make two indentical versions of it to run it twice easily
+		if size(y_power) == 1: y_power = [y_power, y_power]
+		if size(y_scale) == 1: y_sharpen = [y_sharpen, y_sharpen]
+		if size(y_scale) == 1: wave_smooth = [wave_smooth, wave_smooth]
+		if y_sharpen[0] > 0.: #If user specifies they want to sharpen the H I lines in the synthetic Vega spectrum, smaller sharp numbers will sharpen the lines more, best to start with a very large number
+			g = Gaussian1DKernel(stddev = y_sharpen[0]) #Set up gaussian smoothing for Vega I lines, here sharp = std deviation in pixels of gaussian used for smoothing
+			smooothed_interpolated_vega_lines	= convolve(continuum_normalized_vega_flux, g) - 1.0 #Smooth the vega lines, subtract one to put continuum for the smoothed liens on the x axis
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[0] * ((continuum_normalized_vega_flux-smooothed_interpolated_vega_lines)**y_power[0]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		else: #Ignore sharpening and just use the old method (most common action taken)
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[0] * (continuum_normalized_vega_flux**y_power[0]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		interpolated_vega_lines_0 =  intepolate_vega_lines(waves) #Grab interpoalted lines once			
+		if y_sharpen[1] > 0.: #If user specifies they want to sharpen the H I lines in the synthetic Vega spectrum, smaller sharp numbers will sharpen the lines more, best to start with a very large number
+			g = Gaussian1DKernel(stddev = y_sharpen[1]) #Set up gaussian smoothing for Vega I lines, here sharp = std deviation in pixels of gaussian used for smoothing
+			smooothed_interpolated_vega_lines	= convolve(continuum_normalized_vega_flux, g) - 1.0 #Smooth the vega lines, subtract one to put continuum for the smoothed liens on the x axis
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[1] * ((continuum_normalized_vega_flux-smooothed_interpolated_vega_lines)**y_power[1]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		else: #Ignore sharpening and just use the old method (most common action taken)
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[1] * (continuum_normalized_vega_flux**y_power[1]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		interpolated_vega_lines_1 =  intepolate_vega_lines(waves) #Grab interpoalted lines twice			
+		interpolated_vega_lines = interpolated_vega_lines_0 + interpolated_vega_lines_1 - 1.0 #Average two sets of modified Vega H I lines together into one synthetic set of lines
+	else: #If there is only one set of inputs for modifying the Vega synetheic spectrum H I lines, just run the single input (This is generally the default you want to do, the thing above is an added complciation)
+		if y_sharpen > 0.: #If user specifies they want to sharpen the H I lines in the synthetic Vega spectrum, smaller sharp numbers will sharpen the lines more, best to start with a very large number
+			g = Gaussian1DKernel(stddev = y_sharpen) #Set up gaussian smoothing for Vega I lines, here sharp = std deviation in pixels of gaussian used for smoothing
+			smooothed_interpolated_vega_lines	= convolve(continuum_normalized_vega_flux, g) - 1.0 #Smooth the vega lines, subtract one to put continuum for the smoothed liens on the x axis
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale * ((continuum_normalized_vega_flux-smooothed_interpolated_vega_lines)**y_power-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		else: #Ignore sharpening and just use the old method (most common action taken)
+			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale * (continuum_normalized_vega_flux**y_power-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
+		interpolated_vega_lines =  intepolate_vega_lines(waves) #Grab interpoalted lines once
 	a0v_synth_cont =  interp1d(waves, redden(B, V, waves, interpolated_vega_continuum), kind='linear', bounds_error=False) #Paint H I line profiles onto Vega continuum to create a synthetic A0V spectrum (not yet reddened)
-	if wave_smooth > 0.:  #If user specifies they want to gaussian smooth the synthetic spectrum
+	#STOP
+	if wave_smooth > 0.:  #If user specifies they want to gaussian smooth the synthetic pectrum
 		g = Gaussian1DKernel(stddev = wave_smooth) #Set up gaussian smoothing for Vega I lines, here wave_smooth = std deviation in pixels of gaussian used for smoothing
 		a0v_synth_spec =  interp1d(waves, redden(B, V, waves, convolve(interpolated_vega_lines*interpolated_vega_continuum, g)), kind='linear', bounds_error=False) #Artifically redden synthetic A0V spectrum to match standard star observed
 	else: #If no smoothing 
@@ -264,7 +294,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 			subplots(nrows=2, ncols=2) #Set up subplots
 			figtext(0.02,0.5,r"Flux", fontsize=20,rotation=90) #Set shared y-axis label
 			figtext(0.4,0.02,r"Wavelength [$\mu$m]", fontsize=20,rotation=0) #Set shared x-axis label
-			figtext(0.15,0.95,r"Check AOV H I line fits (y-scale: "+str(y_scale)+", wave_smooth: "+str(wave_smooth)+", std_shift: "+str(std_shift)+")", fontsize=20,rotation=0) #Shared title
+			figtext(0.05,0.95,r"Check AOV H I line fits (y-scale: "+str(y_scale)+", y-power: "+str(y_power)+", y_sharpen: "+str(y_sharpen)+" wave_smooth: "+str(wave_smooth)+", std_shift: "+str(std_shift)+")", fontsize=12,rotation=0) #Shared title
 			waves = std.combospec.wave #Wavelength array to interpolate to
 			normalized_HI_lines = a0v_synth_cont(waves)/a0v_synth_spec(waves) #Get normalized lines to the wavelength array
 			for i in xrange(n_HI_lines): #Loop through each H I line we want to preview
@@ -322,15 +352,12 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 
 #Class creates, stores, and displays lines as position velocity diagrams, one of the main tools for analysis
 class position_velocity:
-	def __init__(self, input_spec1d, input_spec2d, line_list, make_1d=False, shift_lines='', velocity_range=set_velocity_range, velocity_res=set_velocity_res):
+	def __init__(self, input_spec1d, input_spec2d, line_list, make_1d=False, make_1d_y_range=[0,0], shift_lines='', velocity_range=set_velocity_range, velocity_res=set_velocity_res):
 		spec1d = copy.deepcopy(input_spec1d)
 		spec2d = copy.deepcopy(input_spec2d)
-		#slit_pixel_length = len(spec2d.flux[:,0]) #Height of slit in pixels for this target and band
 		slit_pixel_length = shape(spec2d.flux)[0] #Height of slit in pixels for this target and band
 		wave_pixels = spec2d.wave #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
-		#wave_interp = interp1d(x, wave_pixels, kind = 'linear') #Interpolation for inputting pixel x and getting back wavelength
-		#x_interp = interp1d(wave_pixels, x, kind = 'linear') #Interpolation for inputting wavlength and getting back pixel x
 		interp_velocity = arange(-velocity_range, velocity_range, velocity_res) #Velocity grid to interpolate each line onto
 		show_lines = line_list.parse(flat_nanmin(wave_pixels), flat_nanmax(wave_pixels)) #Only grab lines withen the wavelength range of the current order
 		n_lines = len(show_lines.wave) #Number of spectral lines
@@ -345,7 +372,6 @@ class position_velocity:
 			save_shift_wave = zeros(n_lines) #Create arrays to store shifted wavelengths and velocities
 			save_shift_v = zeros(n_lines)
 			for i in xrange(len(shift_labels)): #Go through each line and shift it's wavlength
-				#find_line = where(show_lines.label == shift_labels[i])[0][0] #Find matching line to shift
 				find_line = show_lines.label == shift_labels[i]
 				if any(find_line): #Only run if a line is found
 					pre_shfited_wavelength = copy.deepcopy(show_lines.wave[find_line]) #Save pre shifted wavelength
@@ -355,7 +381,6 @@ class position_velocity:
 				#print shift_labels[i]
 		for i in xrange(n_lines): #Label the lines
 			pv_velocity = c * ( (wave_pixels / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
-			#dv_dl = velocity_res / ungridded_velocities
 			pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
 			ungridded_wavelengths = wave_pixels[pixel_cut]
 			ungridded_velocities = pv_velocity[pixel_cut]
@@ -374,75 +399,19 @@ class position_velocity:
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
 				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv
 				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * dl_dv**2
-			else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
+			elif make_1d_y_range[1] > 0: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
+				gridded_flux_1d = nansum(gridded_flux_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv**2 #Create 1D variance spectrum by collapsing 2D variance
+			else:
 				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
 				gridded_variance_1d = nansum(gridded_variance_2d, 0) * dl_dv**2 #Create 1D variance spectrum by collapsing 2D variance
-			# if any(isfinite(ungridded_flux_2d)) and any(isfinite(gridded_flux_2d)): #Check if everything near line is nan, if so skip over this code to avoid bug
-			# 	scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-			# 	scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-			# 	scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-			# 	scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-			# else:
-			# 	scale_flux_1d = 1.0
-			# 	scale_flux_2d = 1.0
-			# 	scale_variance_1d = 1.0
-			# 	scale_variance_2d = 1.0
-			# gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
-			# gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
-			# gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
-			# gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
 			flux[i,:] = gridded_flux_1d# *  scale_flux_1d #Append 1D flux array with line
 			var1d[i,:] = gridded_variance_1d# * scale_flux_1d #Append 1D variacne array with line
 			pv[i,:,:] = gridded_flux_2d# * scale_flux_2d #Stack PV spectrum of lines into a datacube
 			var2d[i,:,:] = gridded_variance_2d# * scale_variance_2d  #Stack PV variance of lines into a datacube
-			#stop()
-		# BACKUP FLUX REGRIDDING FROM WAVELENGTH TO VELOCITY SPACE, OLD WAY APPEARS TO HAVE WEIRD GLITCHES SO TRYING A NEW METHOD, DELETE BELOW WHEN NEW METHOD PROVES TO WORK
-		# for i in xrange(n_lines): #Label the lines
-		# 	pv_velocity = c * ( (spec2d.wave / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
-		# 	pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
-		# 	ungridded_velocities = pv_velocity[pixel_cut]
-		# 	ungridded_flux_1d = spec1d.flux[pixel_cut] #PV diagram ungridded on origional pixels
-		# 	ungridded_flux_2d = spec2d.flux[:,pixel_cut] #PV diagram ungridded on origional pixels			
-		# 	ungridded_variance_1d = spec1d.noise[pixel_cut]**2 #PV diagram variance ungridded on original pixesl
-		# 	ungridded_variance_2d = spec2d.noise[:,pixel_cut]**2 #PV diagram variance ungridded on original pixels
-		# 	interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
-		# 	interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
-		# 	gridded_flux_2d = interp_flux_2d(interp_velocity) #PV diagram velocity gridded	
-		# 	gridded_variance_2d = interp_variance_2d(interp_velocity) #PV diagram variance velocity gridded
-		# 	if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
-		# 		gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d)
-		# 		gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d)
-		# 	else: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
-		# 		gridded_flux_1d = nansum(gridded_flux_2d, 0) #Create 1D spectrum by collapsing 2D spectrum
-		# 		gridded_variance_1d = nansum(gridded_variance_2d, 0) #Create 1D variance spectrum by collapsing 2D variance
-		# 	if any(isfinite(ungridded_flux_2d)) and any(isfinite(gridded_flux_2d)): #Check if everything near line is nan, if so skip over this code to avoid bug
-		# 		scale_flux_1d = nansum(ungridded_flux_1d) / nansum(gridded_flux_1d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-		# 		scale_flux_2d = nansum(ungridded_flux_2d) / nansum(gridded_flux_2d) #Scale interpolated flux to original flux so that flux is conserved post-interpolation
-		# 		scale_variance_1d = nansum(ungridded_variance_1d) / nansum(gridded_variance_1d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-		# 		scale_variance_2d = nansum(ungridded_variance_2d) / nansum(gridded_variance_2d) #Scale interpolated variance to original variance so that flux is conserved post-interpolation
-		# 	else:
-		# 		scale_flux_1d = 1.0
-		# 		scale_flux_2d = 1.0
-		# 		scale_variance_1d = 1.0
-		# 		scale_variance_2d = 1.0
-		# 	gridded_flux_1d[gridded_flux_1d == nan] = 0. #Get rid of nan values by setting them to zero
-		# 	gridded_flux_2d[gridded_flux_2d == nan] = 0. #Get rid of nan values by setting them to zero
-		# 	gridded_variance_1d[gridded_variance_1d == nan] = 0. #Get rid of nan values by setting them to zero
-		# 	gridded_variance_2d[gridded_variance_2d == nan] = 0. #Get rid of nan values by setting them to zero
-		# 	flux[i,:] = gridded_flux_1d *  scale_flux_1d #Append 1D flux array with line
-		# 	var1d[i,:] = gridded_variance_1d * scale_flux_1d #Append 1D variacne array with line
-		# 	pv[i,:,:] = gridded_flux_2d * scale_flux_2d #Stack PV spectrum of lines into a datacube
-		# 	var2d[i,:,:] = gridded_variance_2d * scale_variance_2d  #Stack PV variance of lines into a datacube
-		# 	#Filter out really bad pixels, can change max_good_pixels if necessary
 		if shift_lines != '': #If lines were shifted, save the velocities and wavlengths that were shifted in this PV object
 			self.shift_v = save_shift_v
 			self.shift_wave = save_shift_wave
-		#if shift_lines != '': #If user wants to apply a correction in velocity space to a set of lines
-		#	self.shift_v = shift_v #Store the shifts for later reading into latex tables and stuff like that
-		#	self.shift_wave = shift_v * show_lines.wave / c #Calculate change in wavelengths as well, multiply c by 1e9 to convert km to microns)
-		#else: #Else if nothing is found
-		#	self.shift_v = zeros(n_lines) #just stick in a dummy variable of zeros
-		#		self.shift_wave = zeros(n_lines)
 		self.flux = flux #Save 1D PV fluxes
 		self.var1d = var1d #Save 1D PV variances
 		self.pv = pv #Save datacube of stack of 2D PV diagrams for each line
@@ -455,7 +424,6 @@ class position_velocity:
 		self.slit_pixel_length = slit_pixel_length #Store number of pixels along slit
 		self.velocity_range = velocity_range #Store velocity range of PV diagrams
 		self.velocity_res = velocity_res #Store velocity resoultion (km/s)
-		#self.s2n = s2n #Store boolean operator if spectrum is a S/N spectrum or not
 	def view(self, line='', wave=0.0,  pause = False, close = False, printlines=False, name='pv'): #Function loads 2D PV diagrams in DS9 and plots 1D diagrams
 		self.save_fits() #Save a fits file of the pv diagrams for opening in DS9
 		ds9.open() #Open DS9
@@ -643,6 +611,55 @@ class position_velocity:
 		output_filename = 'line_lists/' + raw_input('Please give a filename for the line list: ')
 		savetxt(output_filename, save_text, fmt="%s") #Output line list
 		#ion() #Turn interactive plotting mode back on 0
+	def calculate_moments(self, vrange=[-set_velocity_range, set_velocity_range], prange=[0,0], s2n_cut=0.0, s2n_smooth=0.): #Calculate (mathematical) moments of the flux in velocity and position space; explicitely calculates  moments 0, 1, 2 = flux, mean, variance
+		pv = copy.deepcopy(self.pv)
+		if s2n_cut > 0.:
+			g = Gaussian2DKernel(stddev=s2n_smooth)
+			for i in xrange(len(pv)):
+				low_s2n_mask = convolve(pv[i], g) / sqrt(self.var2d[i]) < s2n_cut
+				pv[i][low_s2n_mask] = nan
+		if prange[0] == 0 and prange[1] == 0: #If user does not specify prange explicitely 
+			prange = [0, self.slit_pixel_length] #Set to use the whole slit by default
+		use_velocities = (self.velocity >= vrange[0]) & (self.velocity <= vrange[1]) #Find indicies within velocity range specified by the variable vrange and only at those pixels, masking everything outside that range out
+		position = arange(self.slit_pixel_length) #Set up an array for position along the slit (in pixel space, not in arcseconds)
+		velocity_flux =  nansum(pv[:,:,use_velocities] * self.velocity_res, axis=2) #Calculate moment 0 (the flux) along the velocity axis
+		velocity_mean = nansum(pv[:,:,use_velocities] * self.velocity[use_velocities] * self.velocity_res, axis=2) / velocity_flux
+		velocity_variance =nansum(pv[:,:,use_velocities] * (self.velocity[newaxis,newaxis,use_velocities] - velocity_mean[:,:,newaxis])**2 * self.velocity_res, axis=2) / velocity_flux
+		position_flux = nansum(pv[:,prange[0]:prange[1],:], axis=1)
+		position_mean = nansum(pv[:,prange[0]:prange[1],:] *  position[prange[0]:prange[1],newaxis], axis=1) / position_flux
+		position_variance = nansum(pv[:,prange[0]:prange[1],:] *  (position[newaxis,prange[0]:prange[1],newaxis]-position_mean[:,newaxis,:])**2, axis=1) / position_flux
+		self.velocity_flux = velocity_flux  #Store all the moments in the position_velocity object as these variables for later use
+		self.velocity_mean = velocity_mean
+		self.velocity_variance = velocity_variance
+		self.position_flux = position_flux
+		self.position_mean = position_mean
+		self.position_variance = position_variance
+	def create_moment_mask(self, sigma=1.0): #Create a mask  +/- 3 sigma around the position and velocity moments, used for plotting positions of lines in a simplified way
+		velocity_moment_mask = zeros(shape(self.pv)) #Set up array that will hold masks
+		position_moment_mask = zeros(shape(self.pv)) #Set up array that will hold masks
+		combined_moment_mask = zeros(shape(self.pv)) #Set up array that will hold masks
+		position = arange(self.slit_pixel_length)
+		for i in xrange(len(self.pv)): #Loop through each line
+			for j in xrange(len(self.velocity)): #Loop through each position along the slit
+				three_sigma_range = (position < self.position_mean[i,j]+sigma*sqrt(self.position_variance[i,j])) & (position > self.position_mean[i,j]-sigma*sqrt(self.position_variance[i,j])) #Find +/- 3 sigma from mean
+				position_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
+				combined_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
+			for k in xrange(len(position)): #Loop through each velocity resoultion element
+				three_sigma_range = (self.velocity < self.velocity_mean[i,k]+sigma*sqrt(self.velocity_variance[i,k])) &  (self.velocity > self.velocity_mean[i,k]-sigma*sqrt(self.velocity_variance[i,k]))#Find +/- 3 sigma from mean
+				velocity_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
+				combined_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
+		self.velocity_moment_mask = velocity_moment_mask #Store the moment masks
+		self.position_moment_mask = position_moment_mask
+		self.combined_moment_mask = combined_moment_mask
+	# def get_moment(self, moment, line): #Specify desired moment and line and return the result
+	# 	if not hasattr(self, 'moments'): #Check if moments have been calculated yet
+	# 		print 'Moments not yet calculated.  Claculating now.'
+	# 		self.calculate_moments() #Calculate moments, if not done already
+	# 	i =  where(self.label == line)[0][0] #Search for line by label
+	# 	return self.moments[moment, i, :] #Return moment 
+
+
+
 
 
 
@@ -789,8 +806,10 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
 			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
+				figure(figsize=[11.0,8.5])
 				for i in xrange(n_lines): #Loop through each line
 					#subplot(n_subfigs, n_subfigs, i+1)
+					
 					clf() #Clear plot field
 					ax = subplot(211) #Turn on "ax", set first subplot
 					frame = gca() #Turn off axis number labels
@@ -798,12 +817,13 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
 					if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 						#if not optimal_extraction: #if not optimal extraction just show the results
+						
 						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
 						suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
 						#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
 						#xlabel('Velocity [km s$^{-1}$]')
 						#ylabel('Along slit')
-						ylabel('Position', fontsize=16)
+						ylabel('Position', fontsize=12)
 						#xlabel('Velocity [km s$^{-1}$]')
 						if show_regions and s2n_mask == 0.0 and not optimal_extraction: #By default show the 
 							on_patch_list, on_text_list = on_region.get_mpl_patches_texts() #Do some stuff
@@ -835,9 +855,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								contour(find_background, colors='red', linewidths=0.25) #Plot the backgorund with a dotted line
 								#stop()
 							#except:
-							#	stop()
+							#	stop
 						ax = subplot(212) #Turn on "ax", set first subplot
-						pv.plot_1d_velocity(i, clear=False, fontsize=16) #Test plotting 1D spectrum below 2D spectrum
+						pv.plot_1d_velocity(i, clear=False, fontsize=10) #Test plotting 1D spectrum below 2D spectrum
 						pdf.savefig() #Add figure as a page in the pdf
 			figure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		self.wave = line_wave #Save wavelength of lines
@@ -855,6 +875,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			self.weights = weights #Store weights used in extraction
 			self.rolled_weights = rolled_weights #Store pixel shifts in weights used for extractionx
 			self.mask_shift = mask_shift
+		elif s2n_mask == 0.0 and not optimal_extraction: #If user specified region in DS0 is used
+			self.on_region = on_region #Store the region data for later plotting if necessary
 		self.path = path #Save path to 
 	# def fit_mask(self, mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal position (in velocity space) for mask for extracting 
 	# 	smoothed_data = median_filter(data, size=[5,5])
@@ -911,11 +933,101 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		if to_line == '': #If user does not specify line to take ratio relative to
 			to_line = self.label[0]  #Take ratio relative to the first line in the 
 		ratios = factor * self.flux / self.flux[self.label == to_line] #Take ratios, multiply by some factor if comparing to some other table (ie. compared to H-beta as found in Osterbrock & Ferland 2006)
+		ratios_sigma = sqrt(ratios**2 *((self.sigma/self.flux)**2+(self.sigma[self.label == to_line]/self.flux[self.label == to_line])**2))
 		fname = save.path + 'line_ratios_relative_to_' + to_line + '.dat' #Set up file path name to save
 		printme = [] #Array that will hold file ouptut
 		for i in xrange(len(self.label)): #Loop thorugh each line
-			printme.append(self.label[i] + '/'+ to_line + '\t%1.5f' % ratios[i]) #Save ratio to an array that will be outputted as the .dat file
+			printme.append(self.label[i] + '/'+ to_line + '\t%1.5f' % ratios[i] + '\t%1.5f' % ratios_sigma[i]) #Save ratio to an array that will be outputted as the .dat file
 		savetxt(fname, printme, fmt="%s") #Output Table, and we're done
+	# def calculate_HI_extinction(self, s2n_cut=3.0, max_n=16): #Calculate extinction by comparing measured H I line fluxes to theory predicted by pyneb 
+	# 	data_file = 'data/predicted_HI_fluxes.dat' #File storing predicted H I line fluxes
+	# 	state_i, state_j = loadtxt(data_file, unpack=True, dtype='i', delimiter='\t', usecols=(0,1,)) #read in states
+	# 	wave, flux  = loadtxt(data_file, unpack=True, dtype='f', delimiter='\t', usecols=(2,3,)) #Read in wavelength and predicted fluxes
+	# 	#construct a list of all found H I lines
+	# 	found_wavelengths = []
+	# 	found_observed_fluxes = []
+	# 	found_predicted_fluxes = []
+	# 	found_labels = []
+	# 	#loop through each possible H I line in our predicted flux list and see if they exist in this region object, if they do, append the founds lists
+	# 	for i in xrange(len(state_i)):
+	# 		label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
+	# 		find_line = where(self.label == label)[0] #Check if line exists in this region object
+	# 		if len(find_line)==1 and state_i[i] < max_n and state_j[i] < max_n: #If it is found
+	# 			find_line = find_line[0] #Get found line index out of array and into a simple integer
+	# 			if self.s2n[find_line] > s2n_cut:
+	# 				found_labels.append(label)
+	# 				found_wavelengths.append(self.wave[find_line]) #Store waveneghts...
+	# 				found_observed_fluxes.append(self.flux[find_line]) #observed fluxes...
+	# 				found_predicted_fluxes.append(flux[i]) #and predicted fluxes for every H I line found
+	# 	found_wavelengths = array(found_wavelengths) #Convert everything to numpy arrays for easy processing
+	# 	found_observed_fluxes = array(found_observed_fluxes)
+	# 	found_predicted_fluxes = array(found_predicted_fluxes)
+	# 	#Now wee construct the extinction curve
+	# 	A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+	# 	l = array([ 0.806,  1.22 ,  1.63 ,  2.19 ,  3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+	# 	extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+	# 	AVs = arange(0,20.0,0.1) #Create array of exctinations to test
+	# 	n_AVs = len(AVs)
+	# 	chisq = zeros(n_AVs)
+	# 	br14_brgamma_chisq = zeros(n_AVS)
+	# 	br14 = found_labels == 'H I 4-14'
+	# 	brgamma = found_labels == 'H I 4-7'
+	# 	for i in xrange(n_AVs):
+	# 		reddened_predicted_flux = found_predicted_fluxes * 10**(-0.4*extinction_curve(found_wavelengths)*AVs[i])  #Apply artificial reddening to predicted line fluxes
+	# 		ratio = found_observed_fluxes / reddened_predicted_flux #Calculate ratio to observed to artificially reddened predicted line fluxes
+	# 		median_ratio = nanmedian(ratio) #Find the median ratio
+	# 		chisq[i] = nansum(log10(ratio/median_ratio)**2) #calculate the chisq'
+	# 		chisq_br14_brgamma = nansum(log10((ratio[])/))
+	# 	print 'Best A_V for all lines used (minus cuts) = ', AVs[chisq==nanmin(chisq)]
+	# 	#return AVs[chisq==nanmin(chisq)] #return the AV that matches the minimum chisq
+	def calculate_HI_extinction(self, plot_result=True): #Calculate extinction by comparing measured H I line fluxes to theory predicted by pyneb 
+		data_file = 'data/predicted_HI_fluxes.dat' #File storing predicted H I line fluxes
+		state_i, state_j = loadtxt(data_file, unpack=True, dtype='i', delimiter='\t', usecols=(0,1,)) #read in states
+		wave, flux  = loadtxt(data_file, unpack=True, dtype='f', delimiter='\t', usecols=(2,3,)) #Read in wavelength and predicted fluxes
+		#construct a list of all found H I lines
+		predicted_br14_flux = (flux[(state_i==14) & (state_j==4)])[0]
+		predicted_brgamma_flux =  (flux[(state_i==7) & (state_j==4)])[0]
+		#Now wee construct the extinction curve
+		A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+		l = array([ 0.806,  1.22 ,  1.63 ,  2.19 ,  3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+		extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+		AVs = arange(0,20.0,0.01) #Create array of exctinations to test
+		n_AVs = len(AVs)
+		chisq = zeros(n_AVs)
+		observed_br14_brgamma_ratio = (self.flux[self.label=='H I 4-14'] / self.flux[self.label=='H I 4-7'])[0]
+		br14_extinction_curve = extinction_curve(1.5884880)
+		brgamma_extinction_curve = extinction_curve(2.166120)
+		for i in xrange(n_AVs):
+			reddened_predicted_br_14_flux =  predicted_br14_flux * 10**(-0.4*br14_extinction_curve*AVs[i])  #Apply artificial reddening to predicted line fluxes
+			reddened_predcited_br_gamma_flux = predicted_brgamma_flux * 10**(-0.4*brgamma_extinction_curve*AVs[i])  #Apply artificial reddening to predicted line fluxes
+			reddened_predicted_ratio = reddened_predicted_br_14_flux / reddened_predcited_br_gamma_flux #Calculate ratio to observed to artificially reddened predicted line fluxes
+			chisq[i] = (observed_br14_brgamma_ratio-reddened_predicted_ratio)**2 #calculate the chisq'
+		best_AV = AVs[chisq==nanmin(chisq)] 
+		print 'AV = ', best_AV #print the AV that matches the minimum chisq
+		if plot_result:
+			found_wavelengths = []
+			found_observed_fluxes = []
+			found_predicted_fluxes = []
+			found_labels = []
+			#loop through each possible H I line in our predicted flux list and see if they exist in this region object, if they do, append the founds lists
+			for i in xrange(len(state_i)):
+				label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
+				find_line = where(self.label == label)[0] #Check if line exists in this region object
+				if len(find_line)==1 : #If it is found
+					find_line = find_line[0] #Get found line index out of array and into a simple integer
+					found_labels.append(label)
+					found_wavelengths.append(self.wave[find_line]) #Store waveneghts...
+					found_observed_fluxes.append(self.flux[find_line]) #observed fluxes...
+					found_predicted_fluxes.append(flux[i]) #and predicted fluxes for every H I line found
+			found_wavelengths = array(found_wavelengths) #Convert everything to numpy arrays for easy processing
+			found_observed_fluxes = array(found_observed_fluxes)
+			found_predicted_fluxes = array(found_predicted_fluxes)
+			clf()
+			plot(found_wavelengths, found_observed_fluxes / found_predicted_fluxes, 'o', label='Reddening Uncorrected')
+			plot(found_wavelengths, found_observed_fluxes * 10**(0.4*extinction_curve(found_wavelengths)*best_AV) / found_predicted_fluxes, 'o', label='Reddening Corrected')
+			xlabel('Wavelength')
+			ylabel('Dereddend fluxes / predicted fluxes')
+			suptitle('Br-14/Br-$\gamma$ A$_V$ = '+str(best_AV))
 
 
 
@@ -968,7 +1080,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 				line_sigma[i] =  sqrt( nansum(variance[on_target]) ) #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
-					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
+					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=10)
 					pv.plot_1d_velocity(i, clear=False, fontsize=16, show_zero=show_extraction) #Test plotting 1D spectrum below 2D spectrum
 					if show_extraction: #By default, the extraction velocity limits and background level are shown.  If user sets show_extraction = False, these are not shown
 						plot([vrange[0], vrange[0]], [-1e50,1e50], linestyle='--', color = 'blue')  #Plot blueshifted velocity limits
@@ -998,7 +1110,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, 
+def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, y_power=1.0, y_sharpen=0.0,
 		twodim=True, usestd=True, no_flux=False, make_1d=False, median_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
 		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False, std_shift=0.0):
 	if usestd:
@@ -1046,18 +1158,26 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			sci_obj = copy.deepcopy(sci1d_obj) #Make copy of science 1D object so we don't accidently modify the original data
 			sci_obj.combine_orders() #Combine the science data orders
 			oh_flux = oh1d.combospec.flux #Grab OH sky difference 1D flux
+			wave = oh1d.combospec.wave #Grab wavelength array
 			oh_flux[isinf(oh_flux)] = nan #turn infininte oh values into nan to fix errors
 			flux = sci_obj.combospec.flux #Grab science 1D flux
 			g = Gaussian1DKernel(stddev=20) #Prepare to smooth the OH sky difference data to find where there are OH residuals and where there are none
 			oh_smoothed = abs(convolve(oh_flux,g)) #Smooth OH sky difference frame
 			oh_smoothed = oh_smoothed / nanmax(oh_smoothed) #Normalize to brightest OH residual
-			oh_mask = oh_smoothed > 0.05 #Find all the smoothed OH sky difference residuals above 1/20th the brightness of the smoothed brightest residual
+			#oh_mask = oh_smoothed > 0.05 #Find all the smoothed OH sky difference residuals above 1/20th the brightness of the smoothed brightest residual
+			oh_mask = zeros(len(oh_smoothed)) #Set up oh mask as an array of numbers
+			oh_mask[(oh_smoothed/nanmedian(oh_smoothed) > 10.0)] += 1 #Find all pixels above 3x the median of the smoothed residuals
+			OH_lines = lines(OH_line_list, delta_v=0.0) #Load OH line list
+			parsed_OH_lines = OH_lines.parse( flat_nanmin(wave), flat_nanmax(wave))
+			width=0.00006
+			for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
+				oh_mask[abs(wave-parsed_OH_lines.wave[i]) < width] += 1 #Create mask of OH lines...
 			g = Gaussian1DKernel(stddev=200) #Prepare to smooth the science data to zero out any continuum
 			flux = flux - convolve(flux, g) #Subtract a crude fit to the continuum so that most of the OH residuals start around 0 flux
 			flex = arange(-4.0, 4.0, 0.05) #Range of flexure shifts to test
 			scales = arange(-4.0,4.0,0.01) #Range of OH scales to test
-			in_h_band = (sci_obj.combospec.wave < 1.85) & oh_mask #Find only pixels in the H band and near an OH residual
-			in_k_band = (sci_obj.combospec.wave > 1.85) & oh_mask #Find only pixels in the K band and near an OH residual
+			in_h_band = (sci_obj.combospec.wave < 1.85) & (oh_mask == 2) #Find only pixels in the H band and near a bright OH residual
+			in_k_band = (sci_obj.combospec.wave > 1.85) & (oh_mask == 2) #Find only pixels in the K band and near a bright OH residual
 			h_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for h band
 			k_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for k band
 			for i in xrange(len(scales)): #Loop through each possible scaling of the OH residuals
@@ -1069,8 +1189,8 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 					k_store_chi_sq[i,k] = nansum((diff[in_k_band])**2) #Calculate chisq for K band
 			h_store_chi_sq[h_store_chi_sq==0.] = nan #Nan out zeros to correct error in finding the real minimum chisq
 			k_store_chi_sq[k_store_chi_sq==0.] = nan
-			best_h_band_indicies = where(h_store_chi_sq == flat_nanmin(abs(h_store_chi_sq))) #Find best fit by findinging the minimum chisq in the H band
-			best_k_band_indicies = where(k_store_chi_sq == flat_nanmin(abs(k_store_chi_sq))) #Find best fit by findinging the minimum chisq in the K band
+			best_h_band_indicies = where(h_store_chi_sq == flat_nanmin(h_store_chi_sq)) #Find best fit by findinging the minimum chisq in the H band
+			best_k_band_indicies = where(k_store_chi_sq == flat_nanmin(k_store_chi_sq)) #Find best fit by findinging the minimum chisq in the K band
 			oh_scale = [scales[best_h_band_indicies[0][0]], scales[best_k_band_indicies[0][0]]] #Save OH scaling best fit
 			oh_flexure = [flex[best_h_band_indicies[1][0]], flex[best_k_band_indicies[1][0]]] #Save OH flexure best fit
 			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
@@ -1138,10 +1258,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
-		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth, savechecks=savechecks,
+		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks,
 			telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut) #For 1D spectrum
 		if twodim: #If user specifies this object has a 2D spectrum
-			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, wave_smooth=wave_smooth, savechecks=savechecks, 
+			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks, 
 				telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut) #Run for 2D spectrum
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
@@ -1260,7 +1380,27 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
+	def subtract_continuum(self, show = False, sizes=[1000,500]): #Subtract continuum and background with an iterative running median
+		orders = self.orders
+		for order in orders: #Apply continuum subtraction to each order seperately
+				flux = copy.deepcopy(order.flux)
+				whole_order_trace = nanmedian(flux)
+				if whole_order_trace == nan: whole_order_trace = 0.
+				flux = flux - whole_order_trace #Do an intiial removal of the flux
+				nx = len(flux) 
+				for size in sizes:
+					x_left = arange(nx) - size #Create array to store left side of running median
+					x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
+					x_right = arange(nx) + size #Create array to store right side of running median
+					x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
+					x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
+					unmodified_flux = copy.deepcopy(flux)	
+					for i in xrange(nx):
+							trace = nanmedian(unmodified_flux[x_left[i]:x_right[i]])
+							if trace == nan: trace = 0.
+							flux[i] -= trace
+				order.flux = flux	
+	def old_subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
 			first_order = True #Keep track of where we are in the so we only create the legend on the first order
@@ -1514,10 +1654,11 @@ class spec2d:
 		n_orders = fits_spec.n_orders
 		#n_orders = len(spec2d[1].data[:,0]) #Calculate number of orders to use  
 		#slit_pixel_length = len(spec2d[0].data[0,:,:]) #Height of slit in pixels for this target and band
-		if interpolate_slit:
-			slit_pixel_length = 500 #Height of slit in pixels if we reinterpolate the slit onto a common grid
-		else:
-			slit_pixel_length = slit_length  #Height of slit in pixels for this target and band
+		# if interpolate_slit:
+		# 	slit_pixel_length = 500 #Height of slit in pixels if we reinterpolate the slit onto a common grid
+		# else:
+		# 	slit_pixel_length = slit_length  #Height of slit in pixels for this target and band
+		slit_pixel_length = slit_length  #Height of slit in pixels for this target and band
 		orders = [] #Set up empty list for storing each orders
 		#wavedata = wavedata[0].data.byteswap().newbyteorder()
 		for i in xrange(n_orders):
@@ -1527,24 +1668,28 @@ class spec2d:
 			#nx, ny, nz = shape(spec2d[0].data.byteswap().newbyteorder())
 			#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
 			nx, ny, nz = shape(spec2d)
-			zero_mask = zeros([ny,nz]) #Find any bad pixels/Cosmic-rays zeroed out by PLP
-			zero_mask[spec2d[i,:,:]==0.] = 1.0
-			zero_mask[roll(spec2d[i,:,:],1,axis=0)==0.] = 1.0 #...along with adjacent pixels...
-			zero_mask[roll(spec2d[i,:,:],-1,axis=0)==0.] = 1.0
-			zero_mask[roll(spec2d[i,:,:],1,axis=1)==0.] = 1.0
-			zero_mask[roll(spec2d[i,:,:],-1,axis=1)==0.] = 1.0
-			spec2d[i,:,:][zero_mask==1.0] = nan #...and turn them into nans, so I don't accidently subtract flux during continuum subtraction (and other possible glitches)
-			var2d[i,:,:][zero_mask==1.0] = nan 
-			if interpolate_slit: #If user specifies interpoalting the, do that
-				data2d = regrid_slit(spec2d[i,:,:]) 
-				noise2d = regrid_slit(sqrt(var2d[i,:,:]))
-			else:
-				data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
-				#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
-				#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
-				#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
-				#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
-				noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
+			# zero_mask = zeros([ny,nz]) #Find any bad pixels/Cosmic-rays zeroed out by PLP
+			# zero_mask[spec2d[i,:,:]==0.] = 1.0
+			# zero_mask[roll(spec2d[i,:,:],1,axis=0)==0.] = 1.0 #...along with adjacent pixels...
+			# zero_mask[roll(spec2d[i,:,:],-1,axis=0)==0.] = 1.0
+			# zero_mask[roll(spec2d[i,:,:],1,axis=1)==0.] = 1.0
+			# zero_mask[roll(spec2d[i,:,:],-1,axis=1)==0.] = 1.0
+			# spec2d[i,:,:][zero_mask==1.0] = nan #...and turn them into nans, so I don't accidently subtract flux during continuum subtraction (and other possible glitches)
+			# var2d[i,:,:][zero_mask==1.0] = nan 
+			if interpolate_slit or ny!=slit_pixel_length: #If user specifies interpoalting or the slit size does not match the slit size set by the user, interpolate the darn thing
+				data2d = regrid_slit(spec2d[i,:,:], size=slit_pixel_length) 
+				noise2d = regrid_slit(sqrt(var2d[i,:,:]), size=slit_pixel_length)
+				print 'Slit pixel length does not match, interpolate to fix it!'
+			else: #Or just read it in, super simple right?
+				data2d = spec2d[i,:,:]
+				noise2d = sqrt(var2d[i,:,:])
+			# else:
+			# 	data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
+			# 	#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			# 	#data2d = spec2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
+			# 	#noise2d = sqrt( var2d[0].data[i,0:slit_pixel_length,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+			# 	#noise2d = sqrt( var2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() ) #Grab 2D variance of current order and convert to noise with sqrt(variance)
+			# 	noise2d = sqrt(var2d[i,ny-slit_pixel_length-1:ny-1,:])
 			if mask_cosmics: #If user specifies to filter out cosmic rays
 				#data2d_vert_sub = data2d - nanmedian(data2d, 0) #subtract vertical spectrum to get rid of sky lines and other junk
 				cosmics_found = (abs( (data2d/robust_median_filter(data2d,size=cosmic_horizontal_mask))-1.0) >cosmic_horizontal_limit) & (abs(data2d/noise2d) > cosmic_s2n_min) #Find cosmics where the signal is 100x what is expected from a 3x3 median filter
@@ -1555,7 +1700,7 @@ class spec2d:
 		self.n_orders = n_orders
 		self.slit_pixel_length = slit_pixel_length
 	#This function applies continuum and background subtraction to one order
-	def subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], linear_fit=False, mask_outliers=False, use_combospec=False):
+	def old_subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], linear_fit=False, mask_outliers=False, use_combospec=False, split_trace=False):
 		if linear_fit: #WARNING EXPERIMENTAL, If a linear fit, initialize the polynomial fitting routines
 			p_init = models.Polynomial1D(degree=2)
 			fit_p = fitting.SimplexLSQFitter()
@@ -1569,108 +1714,136 @@ class spec2d:
 		else: #Else use each order seperately
 			orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
-			#print 'order = ', i, 'number of dimensions = ', num_dimensions
-			old_order =  copy.deepcopy(order)
-			flux_length = shape(old_order.flux)[1] #Get length (in wavelength space) of flux array
-			old_order.flux[nansum(isnan(old_order.flux), axis=1).astype('float')/float(flux_length) > 0.5, :] = 0. #If an entire row is majority nan, zero it out
-			if lines != []: #If user supplies a line list
-				old_order = mask_lines(old_order, lines, vrange=vrange, ndim=2) #Mask out lines with nan with some velocity range, before applying continuum subtraction
-			#stop()
-			if use_combospec: #If user wants to use the whole combined spectrum, make seperate traces for H & K bands
-				h_band = old_order.wave < 1.85
-				k_band = old_order.wave > 1.85
-				h_trace = nanmedian(old_order.flux[:,h_band], axis=1) #Get trace of continuum from median of h-band
-				k_trace = nanmedian(old_order.flux[:,k_band], axis=1) #Get trace of continuum from median of k-band
-				max_y = where(h_trace == flat_nanmax(h_trace))[0][0] #Find peak of trace
-				norm_h_trace =  h_trace / median(h_trace[max_y-1:max_y+1]) #Normalize trace
-				max_y = where(k_trace == flat_nanmax(k_trace))[0][0] #Find peak of trace
-				norm_k_trace =  k_trace / median(k_trace[max_y-1:max_y+1]) #Normalize trace
-				#norm_h_trace[isnan(norm_h_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
-				#norm_k_trace[isnan(norm_k_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
-			else:	
-				trace = nanmedian(old_order.flux, axis=1) #Get trace of continuum from median of whole order
-				trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
-				max_y = where(trace == flat_nanmax(trace))[0][0] #Find peak of trace
-				norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
-				#norm_trace[isnan(norm_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
-			if mask_outliers: #mask columns that deviate significantly from the median continuum trace (ie. emission lines, cosmics, ect.), if the user so desires
-				normalize_order_by_column = old_order.flux  / expand_dims(nanmedian(old_order.flux, axis=0), axis=0) #Normalize each column
-				if use_combospec: #If user is using the combined spectrum to calculate the h and k band traces seperately
-					norm_trace = (norm_h_trace + norm_k_trace) / 2.0 #Simply average the two traces together and use that to find outliers
-				divide_normalized_order_by_trace = normalize_order_by_column / expand_dims(norm_trace, axis=1) #Divide the normalized columns by the normalized trace
-				deviant_pixels = abs(divide_normalized_order_by_trace) > 200.0 #Find pixels that significantly deviate from the trace, this would be anything from emission lines to high noise
-				find_deviant_columns = sum(deviant_pixels, axis=0) > 10 #Find columns with only a few deviant pixels
-				old_order.flux[:, find_deviant_columns] = nan #Mask out deviant pixels
-				#trace_order = ones([61,2048])*expand_dims(trace, axis = 1)
-				#flatten_order_by_trace = old_order.flux / trace_order
-				#set_each_column_to_be_unity = flatten_order_by_trace / nanmedian(flatten_order_by_trace, axis=0)
-			#old_order.flux[isnan(old_order.flux)] = 0. #Zero out nans when normalizing the flux to get rid of some annoying errors
-			if linear_fit: ##WARNING EXPERIMENTAL, If user wants to use a line fit of the trace along the x direction
-				for i in xrange(N): #Loop through each segment
-					median_set[i,:] = nanmedian(old_order.flux[:,set_size*i: set_size*(i+1)-1], axis=1) #Find trace of this single segment
-				normalized_median_set = nanmax(median_set, axis=1) #Normalize the median sets by the trace and then collapse result along slit
-				finite_pixels = isfinite(normalized_median_set)
-				p = fit_p(p_init, x_for_median_set[finite_pixels], normalized_median_set[finite_pixels])
-				result_2d = p(x) * expand_dims(trace, axis=1)
-				# p_init = models.Polynomial1D(degree=4)
-				# fit_p = fitting.SimplexLSQFitter()
-				# nx = len(old_order.flux[0,:])
-				# ny = len(old_order.flux[:,0])
-			 # 	x = arange(nx)
-			 # 	result_2d = zeros([ny,nx])
-			 # 	for row in xrange(ny):
-			 # 		if any(isfinite(old_order.flux[row,:])):
-				# 		#stop()
-				# 		p =  fit_p(p_init, x, old_order.flux[row,:])
-				#  		result_2d[row,:] = p(x)
-				subtracted_flux = order.flux - result_2d
-			elif use_combospec: #If user wants to use the whole combined spectrum, make seperate traces for H & K bands
-				subtracted_flux = zeros(shape(old_order.flux))
-				#Do H-band
-				median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, h_band], size = size) #Take a robust running median along the trace
-				median_result_2d = norm_h_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
-				median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
-				subtracted_flux[:,h_band] = order.flux[:,h_band] - median_result_2d #Apply continuum subtraction
-				#Do K-band
-				median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, k_band], size = size) #Take a robust running median along the trace
-				median_result_2d = norm_k_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
-				median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
-				subtracted_flux[:,k_band] = order.flux[:,k_band] - median_result_2d #Apply continuum subtraction
+			#if sum(isnan(order.flux)) / size(order.flux) < 0.8: #Only try to subtract the continuum if at least 80% of the pixels exist
+				#print 'order = ', i, 'number of dimensions = ', num_dimensions
+				old_order =  copy.deepcopy(order)
+				flux_length = shape(old_order.flux)[1] #Get length (in wavelength space) of flux array
+				old_order.flux[nansum(isnan(old_order.flux), axis=1).astype('float')/float(flux_length) > 0.5, :] = 0. #If an entire row is majority nan, zero it out
+				if lines != []: #If user supplies a line list
+					old_order = mask_lines(old_order, lines, vrange=vrange, ndim=2) #Mask out lines with nan with some velocity range, before applying continuum subtraction
+				#stop()
+				if use_combospec: #If user wants to use the whole combined spectrum, make seperate traces for H & K bands
+					h_band = old_order.wave < 1.85
+					k_band = old_order.wave > 1.85
+					h_trace = nanmedian(old_order.flux[:,h_band], axis=1) #Get trace of continuum from median of h-band
+					k_trace = nanmedian(old_order.flux[:,k_band], axis=1) #Get trace of continuum from median of k-band
+					max_y = where(h_trace == flat_nanmax(h_trace))[0][0] #Find peak of trace
+					norm_h_trace =  h_trace / median(h_trace[max_y-1:max_y+1]) #Normalize trace
+					max_y = where(k_trace == flat_nanmax(k_trace))[0][0] #Find peak of trace
+					norm_k_trace =  k_trace / median(k_trace[max_y-1:max_y+1]) #Normalize trace
+					#norm_h_trace[isnan(norm_h_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
+					#norm_k_trace[isnan(norm_k_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
+				else:
+					if split_trace: #If the trace varies siginificantly across orders (for whatever reason), you can try to split the trace and then average the results, this might give a better continuum subtraction
+						half_way_point = shape(old_order.flux)[1]/2
+						trace = 0.5*(nanmedian(old_order.flux[:,0:half_way_point], axis=1) + nanmedian(old_order.flux[:,half_way_point:]))
+					else: #Or else just use the whole order to find the trace, this is the default
+						trace = nanmedian(old_order.flux, axis=1) #Get trace of continuum from median of whole order
+					trace[isnan(trace)] = 0.0 #Set nan values near edges to zero
+					max_y = where(trace == flat_nanmax(trace))[0][0] #Find peak of trace
+					norm_trace = trace / median(trace[max_y-1:max_y+1]) #Normalize trace
+					#norm_trace[isnan(norm_trace)] = 0. #Zero out nans in trace incase an entire row in the spectrum is nans
+				if mask_outliers: #mask columns that deviate significantly from the median continuum trace (ie. emission lines, cosmics, ect.), if the user so desires
+					normalize_order_by_column = old_order.flux  / expand_dims(nanmedian(old_order.flux, axis=0), axis=0) #Normalize each column
+					if use_combospec: #If user is using the combined spectrum to calculate the h and k band traces seperately
+						norm_trace = (norm_h_trace + norm_k_trace) / 2.0 #Simply average the two traces together and use that to find outliers
+					divide_normalized_order_by_trace = normalize_order_by_column / expand_dims(norm_trace, axis=1) #Divide the normalized columns by the normalized trace
+					deviant_pixels = abs(divide_normalized_order_by_trace) > 200.0 #Find pixels that significantly deviate from the trace, this would be anything from emission lines to high noise
+					find_deviant_columns = sum(deviant_pixels, axis=0) > 10 #Find columns with only a few deviant pixels
+					old_order.flux[:, find_deviant_columns] = nan #Mask out deviant pixels
+					#trace_order = ones([61,2048])*expand_dims(trace, axis = 1)
+					#flatten_order_by_trace = old_order.flux / trace_order
+					#set_each_column_to_be_unity = flatten_order_by_trace / nanmedian(flatten_order_by_trace, axis=0)
+				#old_order.flux[isnan(old_order.flux)] = 0. #Zero out nans when normalizing the flux to get rid of some annoying errors
+				if linear_fit: ##WARNING EXPERIMENTAL, If user wants to use a line fit of the trace along the x direction
+					for i in xrange(N): #Loop through each segment
+						median_set[i,:] = nanmedian(old_order.flux[:,set_size*i: set_size*(i+1)-1], axis=1) #Find trace of this single segment
+					normalized_median_set = nanmax(median_set, axis=1) #Normalize the median sets by the trace and then collapse result along slit
+					finite_pixels = isfinite(normalized_median_set)
+					p = fit_p(p_init, x_for_median_set[finite_pixels], normalized_median_set[finite_pixels])
+					result_2d = p(x) * expand_dims(trace, axis=1)
+					# p_init = models.Polynomial1D(degree=4)
+					# fit_p = fitting.SimplexLSQFitter()
+					# nx = len(old_order.flux[0,:])
+					# ny = len(old_order.flux[:,0])
+				 # 	x = arange(nx)
+				 # 	result_2d = zeros([ny,nx])
+				 # 	for row in xrange(ny):
+				 # 		if any(isfinite(old_order.flux[row,:])):
+					# 		#stop()
+					# 		p =  fit_p(p_init, x, old_order.flux[row,:])
+					#  		result_2d[row,:] = p(x)
+					subtracted_flux = order.flux - result_2d
+				elif use_combospec: #If user wants to use the whole combined spectrum, make seperate traces for H & K bands
+					subtracted_flux = zeros(shape(old_order.flux))
+					#Do H-band
+					median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, h_band], size = size) #Take a robust running median along the trace
+					median_result_2d = norm_h_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
+					median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
+					subtracted_flux[:,h_band] = order.flux[:,h_band] - median_result_2d #Apply continuum subtraction
+					#Do K-band
+					median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, k_band], size = size) #Take a robust running median along the trace
+					median_result_2d = norm_k_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
+					median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
+					subtracted_flux[:,k_band] = order.flux[:,k_band] - median_result_2d #Apply continuum subtraction
 
-			else: #If user wants to use running median filter
-				median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
-				median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
-				median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
-				subtracted_flux = order.flux - median_result_2d #Apply continuum subtraction
-			order.flux = subtracted_flux
-		#if show: #Display subtraction in ds9 if user sets show = True
-			#if num_dimensions == 2:
-				#show_file = fits.PrimaryHDU(cont_sub.combospec.flux) #Set up fits file object
-				#show_file.writeto(scratch_path + 'test_contsub_median.fits', clobber = True) #Save fits file
-				#show_file = fits.PrimaryHDU(old_sci.combospec.flux) #Set up fits file object
-				#show_file.writeto(scratch_path + 'test_contsub_before.fits', clobber = True) #Save fits file
-				#show_file = fits.PrimaryHDU(sci.combospec.flux) #Set up fits file object
-				#show_file.writeto(scratch_path + 'test_contsub_after.fits', clobber = True) #Save fits file
-				#ds9.open()
-				#ds9.show(scratch_path + 'test_contsub_before.fits')
-				#ds9.show(scratch_path + 'test_contsub_median.fits', new = True)
-				#ds9.show(scratch_path + 'test_contsub_after.fits', new = True)
-				#ds9.set('zoom to fit')
-				#ds9.set('scale log') #Set view to log scale
-				#ds9.set('scale ZScale') #Set scale limits to ZScale, looks okay
-				#ds9.set('lock scale')
-				#ds9.set('lock colorbar')
-				#ds9.set('frame lock image')
-				#wait()
-				##ds9.close()
-			#elif num_dimensions == 1:
-				#clf()
-				#plot(sci.combospec.wave, sci.combospec.flux, label='Science Target - Continuum Subtracted')
-				#plot(old_sci.combospec.wave, old_sci.combospec.flux, label='Science Target - Continuum Not Subtracted')
-				#plot(cont_sub.combospec.wave, cont_sub.combospec.flux, label='Continuum Subtraction')
-				#legend()
-			#else:
-				#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
+				else: #If user wants to use running median filter
+					median_result_1d = robust_median_filter(old_order.flux[max_y-1:max_y+1, :], size = size) #Take a robust running median along the trace
+					median_result_2d = norm_trace * expand_dims(median_result_1d, axis = 1) #Expand trace into 2D by multiplying by the robust median
+					median_result_2d = median_result_2d.transpose() #Flip axes to match flux axes
+					subtracted_flux = order.flux - median_result_2d #Apply continuum subtraction
+				order.flux = subtracted_flux
+			#if show: #Display subtraction in ds9 if user sets show = True
+				#if num_dimensions == 2:
+					#show_file = fits.PrimaryHDU(cont_sub.combospec.flux) #Set up fits file object
+					#show_file.writeto(scratch_path + 'test_contsub_median.fits', overwrite = True) #Save fits file
+					#show_file = fits.PrimaryHDU(old_sci.combospec.flux) #Set up fits file object
+					#show_file.writeto(scratch_path + 'test_contsub_before.fits', overwrite = True) #Save fits file
+					#show_file = fits.PrimaryHDU(sci.combospec.flux) #Set up fits file object
+					#show_file.writeto(scratch_path + 'test_contsub_after.fits', overwrite = True) #Save fits file
+					#ds9.open()
+					#ds9.show(scratch_path + 'test_contsub_before.fits')
+					#ds9.show(scratch_path + 'test_contsub_median.fits', new = True)
+					#ds9.show(scratch_path + 'test_contsub_after.fits', new = True)
+					#ds9.set('zoom to fit')
+					#ds9.set('scale log') #Set view to log scale
+					#ds9.set('scale ZScale') #Set scale limits to ZScale, looks okay
+					#ds9.set('lock scale')
+					#ds9.set('lock colorbar')
+					#ds9.set('frame lock image')
+					#wait()
+					##ds9.close()
+				#elif num_dimensions == 1:
+					#clf()
+					#plot(sci.combospec.wave, sci.combospec.flux, label='Science Target - Continuum Subtracted')
+					#plot(old_sci.combospec.wave, old_sci.combospec.flux, label='Science Target - Continuum Not Subtracted')
+					#plot(cont_sub.combospec.wave, cont_sub.combospec.flux, label='Continuum Subtraction')
+					#legend()
+				#else:
+					#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
+	def subtract_continuum(self, show = False, sizes=[500], use_combospec=False): #Subtract continuum and background with an iterative running median
+		if use_combospec: #If user specifies to use combined spectrum
+			orders = [self.combospec] #Use the combined spectrum
+		else: #But is usually better to use individual orders instead
+			orders = self.orders
+		for order in orders: #Apply continuum subtraction to each order seperately
+				flux = copy.deepcopy(order.flux)
+				whole_order_trace = nanmedian(flux, axis=1)
+				whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
+				flux = flux - whole_order_trace[:,newaxis] #Do an intiial removal of the flux
+				ny, nx = shape(flux) 
+				for size in sizes:
+					x_left = arange(nx) - size #Create array to store left side of running median
+					x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
+					x_right = arange(nx) + size #Create array to store right side of running median
+					x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
+					x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
+					unmodified_flux = copy.deepcopy(flux)	
+					for i in xrange(nx):
+							trace = nanmedian(unmodified_flux[:,x_left[i]:x_right[i]], axis=1)
+							trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
+							flux[:,i] -= trace
+				order.flux = flux
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
@@ -1806,7 +1979,6 @@ class spec2d:
 		B = E_BV #and assuming B mag is the difference between V and B magnitudes E(B-V)
 		self.combospec.flux = redden(B, V, self.combospec.wave, self.combospec.flux) #Artificially deredden flux
 		self.combospec.noise = redden(B, V, self.combospec.wave, self.combospec.noise) #Artificially scale noise to match S/N of dereddened flux
-
 
 
 		
