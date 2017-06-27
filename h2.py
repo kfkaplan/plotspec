@@ -190,6 +190,151 @@ def make_line_list():
 	transitions = h2_transitions(J_obj, V_obj, E_obj, A) #Create main transitions object
 	return transitions #Return transitions object
 
+
+#Calculate a weighted mean for extinction (A_V)
+def calculate_exctinction(transitions, use_Av = [0.0,50.0]):
+	A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+	l = array([ 0.806,  1.22 ,  1.63 ,  2.19 ,  3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+	extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+	n_doubles_found = 0 #Count doubles (pair from same upper state)
+	n_trips_found = 0 #Count trips
+	i = (transitions.F != 0.0) & (transitions.s2n > 3.0) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	J_upper_found = unique(transitions.J.u[i]) #Find J for all (detected) transition upper states
+	V_upper_found = unique(transitions.V.u[i]) #Find V for all (detected) transition upper states
+	lines_found = []
+	Avs = [] #Store Avs found
+	sigma_Avs = [] #store uncertainity in Avs 
+	for V in V_upper_found: #Check each upper V for pairs		
+		for J in J_upper_found: #Check each upper J for pairs
+			match_upper_states = (transitions.J.u[i] == J) & (transitions.V.u[i] == V) #Find all transitions from the same upper J and V state
+			waves = transitions.wave[i][match_upper_states] #Store wavelengths of all found transitions
+			s = argsort(waves) #sort by wavelength
+			waves = waves[s]
+			labels = transitions.label[i][match_upper_states][s]
+			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
+				print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+				ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
+				Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[1])) #Calculate exctinction in Av
+				sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
+				print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+				print 'Calculated A_V = ', Av
+				lines_found.append(labels[0]) #Store line labels of lines found
+				lines_found.append(labels[1])
+				if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
+					Avs.append(Av) #Store Avs
+					sigma_Avs.append(sigma_Av) #Store sigma Avs
+			elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
+				lines_found.append(labels[0]) #Store line labels of lines found
+				lines_found.append(labels[1])
+				lines_found.append(labels[2])
+				#Pair 1
+				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
+					print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
+					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[1])) #Calculate exctinction in Av
+					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', Av
+					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
+						Avs.append(Av) #Store Avs
+						sigma_Avs.append(sigma_Av) #Store sigma Avs
+				#Pair 2
+				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
+					print 'For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':'
+					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[2])
+					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[2])) #Calculate exctinction in Av
+					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', Av
+					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
+						Avs.append(Av) #Store Avs
+						sigma_Avs.append(sigma_Av) #Store sigma Avs
+				#Pair 3
+					print 'For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':'
+					ratio_of_ratios = transitions.flux_ratio(labels[1], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[1], labels[2])
+					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[1])-extinction_curve(waves[2])) #Calculate exctinction in Av
+					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
+					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
+					print 'Calculated A_V = ', Av
+					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
+						Avs.append(Av) #Store Avs
+						sigma_Avs.append(sigma_Av) #Store sigma Avs
+				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+					n_trips_found += 1
+	print 'Number of pairs from same upper state = ', n_doubles_found
+	print 'Number of tripples from same upper state = ', n_trips_found
+	Avs = array(Avs) #Convert to numpy arrays to do vector math to figure out weighted mean
+	sigma_Avs = array(sigma_Avs)
+	weights = sigma_Avs**-2
+	summed_weights = nansum(weights)
+	weighted_mean_Av = nansum(Avs * weights) / summed_weights
+	weighted_sigma_Av = sqrt(1.0 / summed_weights)
+	print 'Weighted mean Av = %4.2f' %  weighted_mean_Av + ' +/- %4.2f' % weighted_sigma_Av
+	return weighted_mean_Av, weighted_sigma_Av
+
+#Simple algorithim to vary alpha (exctinction curve power law) and A_k and do a chi sq
+#minimization to find the best fit for the observed - intrinsic line ratios
+def find_best_extinction_correction(h_in, s2n_cut=1.0):
+	#First find all the line pairs and store their indicies
+	pair_a = [] #Store index numbers of one of a set of line pairs from the same upper state
+	pair_b = [] #Store index numbers of the other of a set of line pairs from the same upper state
+	i = (h_in.F != 0.0) & (h_in.s2n > 0.5) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+	J_upper_found = unique(h_in.J.u[i]) #Find J for all (detected) transition upper states
+	V_upper_found = unique(h_in.V.u[i]) #Find V for all (detected) transition upper states
+	for V in V_upper_found: #Check each upper V for pairs		
+		for J in J_upper_found: #Check each upper J for pairs
+			i = (h_in.F != 0.0) & (h_in.s2n > s2n_cut) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+			match_upper_states = (h_in.J.u[i] == J) & (h_in.V.u[i] == V) #Find all transitions from the same upper J and V state
+			waves = h_in.wave[i][match_upper_states] #Store wavelengths of all found transitions
+			s = argsort(waves) #sort by wavelength
+			waves = waves[s]
+			labels = h_in.label[i][match_upper_states][s]
+			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate observed vs. intrinsic ratio
+				pair_a.append(where(h_in.wave == waves[0])[0][0])
+				pair_b.append(where(h_in.wave == waves[1])[0][0])
+			elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
+				#Pair 1
+				if abs(waves[0] - waves[1]) > wave_thresh:
+					pair_a.append(where(h_in.wave == waves[0])[0][0])
+					pair_b.append(where(h_in.wave == waves[1])[0][0])
+				#Pair 2
+				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
+					pair_a.append(where(h_in.wave == waves[0])[0][0])
+					pair_b.append(where(h_in.wave == waves[2])[0][0])
+				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+					pair_a.append(where(h_in.wave == waves[1])[0][0])
+					pair_b.append(where(h_in.wave == waves[2])[0][0])
+	pair_a = array(pair_a) #Turn lists of indicies into arrays of indicies
+	pair_b = array(pair_b)
+	chisqs = [] #Store chisq for each possible extinction and extinction law
+	alphas = [] #Store alphas for each possible exctinction and extinction law
+	A_Ks = [] #Store extinctions for each possible exctinction and exctinction law
+	for a in arange(0.5,3.0,0.1): #Loop through different exctinction law powers
+		for A_K in arange(0.0,5.0,0.01): #Loop through different possible K band exctinctions
+			h = copy.deepcopy(h_in) #Make a copy of the input h2 line object
+			A_lambda = A_K * h.wave**(-a) / lambda0**(-a) #Calculate an extinction correction
+			h.F *= 10**(0.4*A_lambda) #Apply extinction correction
+			h.calculate_column_density() #Calculate column densities from each transition, given the guess at extinction correction
+			chisq = nansum((h.N[pair_a] - h.N[pair_b])**2 /  h.N[pair_b]) #Calculate chisq from all line pairs that arise from same upper states
+			chisqs.append(chisq) #Store chisq and corrisponding variables for extinction correction
+			alphas.append(a)
+			A_Ks.append(A_K)
+	chisqs = array(chisqs) #Convert lists to arrays
+	alphas = array(alphas)
+	A_Ks = array(A_Ks)
+	best_fit = chisqs == nanmin(chisqs) #Find the minimum chisq and best fit alpha and A_K
+	best_fit_A_K = A_Ks[best_fit]
+	best_fit_alpha = alphas[best_fit]
+	print 'Best fit alpha =', best_fit_alpha #Print results so user can see
+	print 'Best fit A_K = ', best_fit_A_K
+	A_lambda = best_fit_A_K * h_in.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
+	h_in.F *= 10**(0.4*A_lambda) #Apply extinction correction
+	h_in.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
+
+
+
+
+
 #Test extinction correction by animating stepping through alpha and A_K space and making v_plots of the results
 def animate_extinction_correction(h_in):
 	with PdfPages('animate_extinction_correction.pdf') as pdf:
@@ -315,6 +460,7 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	print 'Number of tripples from same upper state = ', n_trips_found
 
 
+
 #Test printing intrinsic ratios, for debugging/diagnosing extinction
 def test_intrinsic_ratios(transitions):
 	A_lambda = array([ 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
@@ -428,8 +574,7 @@ def import_cloudy(model=''): #Import cloudy model from cloudy directory
  	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
  	L=10**log_L #Convert log luminosity to linear units
  	for i in xrange(len(L)): #Loop through each transition
- 		current_transition = (h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i]) #Find current transition in h2 transitions object for list of H2 lines cloudy outputs
- 		h.F[current_transition] = L[i] #Set flux to be equal to the luminosity of the line outputted by cloudy
+ 		h.F[(h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i])] = L[i] #Find current transition in h2 transitions object for list of H2 lines cloudy outputs and set flux to be equal to the luminosity of the line outputted by cloudy
  	h.calculate_column_density()
 	h.normalize() #Normalize to the 5-3 O(3) line
 	return(h)
@@ -561,6 +706,7 @@ class h2_transitions:
 		self.wave = E.getwave() #Store wavelength of transitions
 		self.path = '' #Store path for saving excitation diagram and other files, read in when reading in region with definition set_Flux
 		self.rot_T = zeros(n_lines)  #Store rotation temperature from fit
+		self.model_ratio = zeros(n_lines) #store ratio to model, if a model fit is performed
 		self.sig_rot_T = zeros(n_lines) #Store uncertainity in rotation temperature fit
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
@@ -766,14 +912,24 @@ class h2_transitions:
 		residuals = e**(log_N-y)
 		sigma_residuals = sqrt(log_N_sigma**2 + y_sigma**2)
 		return rot_temp, sigma_rot_temp, residuals, sigma_residuals
-	def compare_model(self, h2_model, name='compare_model_excitation_diagrams', figsize=[17.0,13], x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), ratio_y_range=[1e-1,1e1],
+	def compare_model(self, h2_model_input, name='compare_model_excitation_diagrams', figsize=[17.0,13], x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), ratio_y_range=[1e-1,1e1],
 		plot_residual_temp=False, residual_temp=default_single_temp, residual_temp_y_intercept=default_single_temp_y_intercept, multi_temp_fit=False,
 		take_ratio=False, s2n_cut=3.0, makeplot=True): #Make a Boltzmann diagram comparing a model (ie. Cloudy) to data, and show residuals, show even and odd vibration states for clarity
 		fname = self.path + '_'+name+'.pdf'
+		h2_model = copy.deepcopy(h2_model_input) #Copy h2 model obj so not to modify the original
 		show_these_v  = [] #Set up a blank vibration array to automatically fill 
 		for v in xrange(14): #Loop through and check each set of states of constant v
+			in_this_v = self.V.u == v
 			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
 				show_these_v.append(v) #store this vibration state for later plotting
+				max_J = max(self.J.u[in_this_v & (self.s2n >= s2n_cut)])
+				if max_J > 6: #If data probes in this rotation ladder beyond J of six`
+					h2_model.N[in_this_v & (self.J.u > max_J+1)] = 0.  #Blank out model where > J + 1 max
+				else:
+					h2_model.N[in_this_v & (self.J.u > 7)] = 0.
+			else:
+				h2_model.N[in_this_v] = 0. #Blank out model if no datapoints are in this rotation ladder
+		self.model_ratio = self.N / h2_model.N #Calulate and store ratio of data/model for later use to make tables or whatever the user wants to script up
 		ratio = copy.deepcopy(self)
 		if take_ratio: #If user actually wants to take a ratio
 			ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
@@ -814,38 +970,39 @@ class h2_transitions:
 				xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
 				pdf.savefig()
 		return(chi_sq) #Return chisq value to quantify the goodness of fit
-
-
-			### Middle
-			# V=[1,3,5,7,9,11,13]
-			# subplot(gs[1])
-			# h2_model.v_plot(V=V, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
-			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
-			# frame = gca() #Turn off axis number labels
-			# setp(frame.get_xticklabels(), visible=False)
-			# setp(frame.get_yticklabels(), visible=False)
-			# subplot(gs[4])
-			# frame = gca() #Turn off axis number labels
-			# setp(frame.get_yticklabels(), visible=False)
-			# ratio.v_plot(V=V, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
-			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
-			# ### Right side
-			# V=[0,2,4,6,8,10,12,14]
-			# subplot(gs[2])
-			# h2_model.v_plot(V=V, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as empty symbols
-			# self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False)
-			# frame = gca() #Turn off axis number labels
-			# setp(frame.get_xticklabels(), visible=False)
-			# setp(frame.get_yticklabels(), visible=False)
-			# subplot(gs[5])
-			# frame = gca() #Turn off axis number labels
-			# setp(frame.get_yticklabels(), visible=False)
-			# ratio.v_plot(V=V, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, y_range=y_range*0.5, x_range=x_range,  clear=False, show_axis_labels=False, no_legend_label=True)
-			# xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
-			# pdf.savefig()
-
-
-			# 	pdf.savefig()
+	def v_plot_with_model(self, h2_model_input, x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), s2n_cut=3.0): #Do a vplot with a model overlayed, a simple form of def compare_model for making multipaneled plots and things with your own scripts
+		h2_model = copy.deepcopy(h2_model_input) #Copy h2 model obj so not to modify the original
+		show_these_v  = [] #Set up a blank vibration array to automatically fill 
+		for v in xrange(14): #Loop through and check each set of states of constant v
+			in_this_v = self.V.u == v
+			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
+				show_these_v.append(v) #store this vibration state for later plotting
+				max_J = max(self.J.u[in_this_v & (self.s2n >= s2n_cut)])
+				if max_J > 6: #If data probes in this rotation ladder beyond J of six`
+					h2_model.N[in_this_v & (self.J.u > max_J+1)] = 0.  #Blank out model where > J + 1 max
+				else:
+					h2_model.N[in_this_v & (self.J.u > 7)] = 0.
+			else:
+				h2_model.N[in_this_v] = 0.  #Blank out model if no datapoints are in this rotation ladder
+		#tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
+		h2_model.v_plot(V=show_these_v, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as lines
+   		self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut)
+   		#ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+   	def v_plot_ratio_with_model(self, h2_model, x_range=[0.0,55000.0], y_range=array([1e-1,1e1]), s2n_cut=3.0, y_label=r'N$_{obs}$/N$_{model}$'):
+   		show_these_v  = [] #Set up a blank vibration array to automatically fill 
+		for v in xrange(14): #Loop through and check each set of states of constant v
+			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
+				show_these_v.append(v) #store this vibration state for later plotting
+		self.model_ratio = self.N / h2_model.N #Calulate and store ratio of data/model for later use to make tables or whatever the user wants to script up
+		ratio = copy.deepcopy(self)
+		ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
+		ratio.Nsigma = self.Nsigma  /  h2_model.N
+		#chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
+		plot([0,100000],[1,1], linestyle='--', color='gray')
+		ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True,
+					show_ratio=True, s2n_cut=s2n_cut, y_range=y_range)
+		#ylabel(y_label, fontsize=18)
+		#xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
    	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -946,14 +1103,13 @@ class h2_transitions:
    		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
    		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
    		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_temp_fit=False,
-   		single_color='none', show_ratio=False):
+   		single_color='none', show_ratio=False, symbsize = 9):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			nonzero = self.N != 0.0
 			if clear: #User can specify if they want to clear the plot
 				clf()
-			symbsize = 9 #Size of symbols on excitation diagram
 			labelsize = 18 #Size of text for labels
 			if orthopara_fill:  #User can specify how they want symbols to be filled
 				orthofill = 'full' #How symbols on excitation diagram are filled, 'full' vs 'none'
@@ -1164,6 +1320,7 @@ class h2_transitions:
 				print 'b = ', b, ' +/- ', b_err
 				print 'T = ', T, ' +/- ', T_err
 				#stop()
+				self.model_ratio = self.N /  (self.g*exp(b-self.T/T)) #Calcualte and store ratio of 
 			#show()
 			draw()
 			if savepdf:
@@ -1343,6 +1500,64 @@ class h2_transitions:
 		ax.set_zlabel('Column Density   ln(N$_i$/g$_i$)-ln(N$_{r}$/g$_{r}$)')
 		draw()
 		stop()
+	def correct_extinction(self, s2n_cut=3.0, alpha_range=arange(0.5,3.0,0.1), A_K_range=arange(0.0,5.0,0.01)): 
+		#First find all the line pairs and store their indicies
+		pair_a = [] #Store index numbers of one of a set of line pairs from the same upper state
+		pair_b = [] #Store index numbers of the other of a set of line pairs from the same upper state
+		i = (self.F != 0.0) & (self.s2n > s2n_cut) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+		J_upper_found = unique(self.J.u[i]) #Find J for all (detected) transition upper states
+		V_upper_found = unique(self.V.u[i]) #Find V for all (detected) transition upper states
+		for V in V_upper_found: #Check each upper V for pairs		
+			for J in J_upper_found: #Check each upper J for pairs
+				#i = (self.F != 0.0) & (self.s2n > s2n_cut) #Find only transitions where a significant measurement of the column density was made (e.g. lines where flux was measured)
+				match_upper_states = (self.J.u[i] == J) & (self.V.u[i] == V) #Find all transitions from the same upper J and V state
+				waves = self.wave[i][match_upper_states] #Store wavelengths of all found transitions
+				s = argsort(waves) #sort by wavelength
+				waves = waves[s]
+				labels = self.label[i][match_upper_states][s]
+				if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate observed vs. intrinsic ratio
+					pair_a.append(where(self.wave == waves[0])[0][0])
+					pair_b.append(where(self.wave == waves[1])[0][0])
+				elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
+					#Pair 1
+					if abs(waves[0] - waves[1]) > wave_thresh:
+						pair_a.append(where(self.wave == waves[0])[0][0])
+						pair_b.append(where(self.wave == waves[1])[0][0])
+					#Pair 2
+					if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
+						pair_a.append(where(self.wave == waves[0])[0][0])
+						pair_b.append(where(self.wave == waves[2])[0][0])
+					if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
+						pair_a.append(where(self.wave == waves[1])[0][0])
+						pair_b.append(where(self.wave == waves[2])[0][0])
+		pair_a = array(pair_a) #Turn lists of indicies into arrays of indicies
+		pair_b = array(pair_b)
+		chisqs = [] #Store chisq for each possible extinction and extinction law
+		alphas = [] #Store alphas for each possible exctinction and extinction law
+		A_Ks = [] #Store extinctions for each possible exctinction and exctinction law
+		for a in alpha_range: #Loop through different exctinction law powers
+			for A_K in A_K_range: #Loop through different possible K band exctinctions
+				h = copy.deepcopy(self) #Make a copy of the input h2 line object
+				A_lambda = A_K * h.wave**(-a) / lambda0**(-a) #Calculate an extinction correction
+				h.F *= 10**(0.4*A_lambda) #Apply extinction correction
+				h.calculate_column_density() #Calculate column densities from each transition, given the guess at extinction correction
+				chisq = nansum((h.N[pair_a] - h.N[pair_b])**2 /  h.N[pair_b]) #Calculate chisq from all line pairs that arise from same upper states
+				chisqs.append(chisq) #Store chisq and corrisponding variables for extinction correction
+				alphas.append(a)
+				A_Ks.append(A_K)
+		chisqs = array(chisqs) #Convert lists to arrays
+		alphas = array(alphas)
+		A_Ks = array(A_Ks)
+		best_fit = chisqs == nanmin(chisqs) #Find the minimum chisq and best fit alpha and A_K
+		best_fit_A_K = A_Ks[best_fit]
+		best_fit_alpha = alphas[best_fit]
+		print 'Best fit alpha =', best_fit_alpha #Print results so user can see
+		print 'Best fit A_K = ', best_fit_A_K
+		A_lambda = best_fit_A_K * self.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
+		self.F *= 10**(0.4*A_lambda) #Apply extinction correction
+		self.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
+		self.A_K = best_fit_A_K #Store extinction paramters in case user wants to inspect or tabulate them later
+		self.alpha = best_fit_alpha 
  
 
 class density_surface(): #Fit surface in v and J space, save object to store surface

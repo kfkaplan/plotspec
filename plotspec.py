@@ -31,6 +31,7 @@ try:  #Try to import bottleneck library, this greatly speeds up things such as n
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
 	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
+import matplotlib.gridspec as grd
 
 #Global variables user should set
 pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
@@ -199,6 +200,7 @@ def redden(B, V, waves, flux):
 	#reddened_flux = flux * 10**( -0.4 * (E_HK/(lambda_H**(-alpha)-lambda_K**(-alpha))) * waves**(-alpha) ) #Apply artificial reddening
 	#stop()
 	return reddened_flux
+
 
 
 #Mask Hydrogen absorption lines in A0V standard star continuum, used during relative flux calibration
@@ -681,6 +683,8 @@ def fit_mask(mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal
 
 #@jit  #Compile JIT using numba
 def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal position for an optimal extraction 
+	#median_smoothed_data = median_filter(data, [5,5])
+	#median_smoothed_variance =  median_filter(variance, [5,5])
 	shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling weights
 	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
 	#max_weight = nanmax(weights) #Find maximum of weights 
@@ -690,6 +694,8 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 		background = nanmedian(data[shifted_weights == 0.0]) #Calculate typical background per pixel
 		flux = nansum((data-background)*shifted_weights) #Calcualte weighted flux
 		sigma = sqrt( nansum(variance*shifted_weights**2) ) #Calculate weighted sigma
+		#flux = nansum((median_smoothed_data-background)*shifted_weights) #Calcualte weighted flux
+		#sigma = sqrt( nansum(median_smoothed_variance*shifted_weights**2) ) #Calculate weighted sigma
 		s2n[i] = flux / sigma
 	if all(isnan(s2n)): #Check if everything in the s2n array is nan, if so this is a bad part of the spectrum
 		return 0 #so return a zero and move along
@@ -700,7 +706,7 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 
 class region: #Class for reading in a DS9 region file, and applying it to a position_velocity object
 	def __init__(self, pv, name='flux', file='', background='', s2n_cut = -99.0, show_regions=True, s2n_mask = 0.0, line='', pixel_range=[-10,10],
-			savepdf=True, optimal_extraction=False, weight_threshold=1e-3):
+			savepdf=True, optimal_extraction=False, weight_threshold=1e-3, systematic_uncertainity=0.0):
 		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		use_background_region = False
 		line_labels =  pv.label #Read out line labels
@@ -731,7 +737,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			signal = copy.deepcopy(pv_data[line_for_weighting,:,:][0])-nanmedian(pv_data[line_for_weighting,:,:][0])
 			signal = median_filter(signal, size=[5,5]) #Median filter signal before calculating weights to get rid of noise spikes, cosmics rays, etc.
 			signal[signal < nanmax(signal) * weight_threshold] = 0. #Zero out pxiels below the background threshold scale
-			weights = abs(signal**2.0) #Grab signal of line to weight by, this signal is what will be used for the optimal extraction
+			weights = signal**2.0 #Grab signal of line to weight by, this signal is what will be used for the optimal extraction
+			#weights = abs(signal)
 			weights = weights / nansum(weights) #Normalize weights
 			#weights[weights < weight_threshold]
 		elif s2n_mask == 0.0: #If user specifies to use a region
@@ -811,14 +818,18 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					#subplot(n_subfigs, n_subfigs, i+1)
 					
 					clf() #Clear plot field
-					ax = subplot(211) #Turn on "ax", set first subplot
-					frame = gca() #Turn off axis number labels
-					frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
-					frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
+					gs = grd.GridSpec(2, 1, wspace = 0.2, hspace=0.05, width_ratios=[1], height_ratios=[0.5,0.5]) #Set up a grid of stacked plots for putting the excitation diagrams on
+					subplots_adjust(hspace=0.05, left=0.08,right=0.96,bottom=0.08,top=0.93) #Set all plots to have no space between them vertically
+					#ax = subplot(211) #Turn on "ax", set first subplot
+					fig = gcf()#Adjust aspect ratio
+					fig.set_size_inches([11.0,8.5]) #Adjust aspect ratio
 					if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
+						ax=subplot(gs[0])
+						frame = gca() #Turn off axis number labels
+						frame.axes.get_xaxis().set_ticks([]) #Turn off axis number labels
+						frame.axes.get_yaxis().set_ticks([]) #Turn off axis number labels
 						#if not optimal_extraction: #if not optimal extraction just show the results
-						
-						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm()) #Save preview of line and region(s)
+						imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm(), aspect='auto') #Save preview of line and region(s)
 						suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=14)
 						#ax[0].set_title('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   S/N = ' + '%.1f' % line_s2n[i])
 						#xlabel('Velocity [km s$^{-1}$]')
@@ -856,10 +867,14 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								#stop()
 							#except:
 							#	stop
-						ax = subplot(212) #Turn on "ax", set first subplot
+						#ax = subplot(212) #Turn on "ax", set first subplot
+						ax = subplot(gs[1])
 						pv.plot_1d_velocity(i, clear=False, fontsize=10) #Test plotting 1D spectrum below 2D spectrum
 						pdf.savefig() #Add figure as a page in the pdf
-			figure(figsize=(11, 8.5), frameon=False) #Reset figure size
+			#figure(figsize=(11, 8.5), frameon=False) #Reset figure size
+		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
+			line_sigma = sqrt(line_sigma**2 + (line_flux*systematic_uncertainity)**2) #Combine the statistical uncertainity with the systematic uncertainity
+			line_s2n = line_flux / line_sigma #And then recalculate the S/N based on the new value
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
 		self.flux = line_flux #Save line fluxes
@@ -922,6 +937,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		lines.append(r"\end{longtable}")
 		#lines.append(r"\end{table}")
 		savetxt(output_filename, lines, fmt="%s") #Output table
+	def normalize(self, normalize_to):  #Normalize all line fluxes by dividing by this number
+		self.flux = self.flux / normalize_to
+		self.sigma = self.sigma / normalize_to
 	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
 		lines = []
 		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
@@ -949,8 +967,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	found_predicted_fluxes = []
 	# 	found_labels = []
 	# 	#loop through each possible H I line in our predicted flux list and see if they exist in this region object, if they do, append the founds lists
-	# 	for i in xrange(len(state_i)):
-	# 		label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
+	# 	for i in xrange(len(state_is[]	# 		label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
 	# 		find_line = where(self.label == label)[0] #Check if line exists in this region object
 	# 		if len(find_line)==1 and state_i[i] < max_n and state_j[i] < max_n: #If it is found
 	# 			find_line = find_line[0] #Get found line index out of array and into a simple integer
@@ -973,7 +990,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	br14 = found_labels == 'H I 4-14'
 	# 	brgamma = found_labels == 'H I 4-7'
 	# 	for i in xrange(n_AVs):
-	# 		reddened_predicted_flux = found_predicted_fluxes * 10**(-0.4*extinction_curve(found_wavelengths)*AVs[i])  #Apply artificial reddening to predicted line fluxes
+	# 		reddened_predicted_flux = found_predicted_fluxes * 10**(-0.4*extinction_curve(found_wavelengths)*AVs[i])  #Apply artificial def  to predicted line fluxes
 	# 		ratio = found_observed_fluxes / reddened_predicted_flux #Calculate ratio to observed to artificially reddened predicted line fluxes
 	# 		median_ratio = nanmedian(ratio) #Find the median ratio
 	# 		chisq[i] = nansum(log10(ratio/median_ratio)**2) #calculate the chisq'
@@ -1031,6 +1048,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 
 
 
+
 def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
 	combined_region = copy.deepcopy(region_A) #Start by created the combined region
 	combined_region.flux += region_B.flux #Add fluxes together
@@ -1041,7 +1059,7 @@ def combine_regions(region_A, region_B, name='combined_region'): #Definition to 
 
 
 class extract: #Class for extracting fluxes in 1D from a position_velocity object
-	def __init__(self, pv, name='flux_1d', file='', background=True, s2n_cut = -99.0, vrange=[0,0], use2d=False, show_extraction=True):
+	def __init__(self, pv, name='flux_1d', file='', background=True, s2n_cut = -99.0, vrange=[0,0], use2d=False, show_extraction=True, systematic_uncertainity=0.0):
 		path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 		line_labels =  pv.label #Read out line labels
 		line_wave = pv.lab_wave #Read out (lab) line wavelengths
@@ -1089,6 +1107,9 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 					#print "background_level = ",background_level
 					pdf.savefig() #Add figure as a page in the pdf
 		#dfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
+		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
+			line_sigma = sqrt(line_sigma**2 + (line_flux*systematic_uncertainity)**2) #Combine the statistical uncertainity with the systematic uncertainity
+			line_s2n = line_flux / line_sigma
 		self.velocity = velocity #Save velocity grid
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
@@ -1096,6 +1117,9 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 		self.s2n = line_s2n #Save line S/N
 		self.sigma = line_sigma #Save the 1 sigma limit
 		self.path = path #Save path to 
+	def normalize(self, normalize_to):  #Normalize all line fluxes by dividing by this number
+		self.flux = self.flux / normalize_to
+		self.sigma = self.sigma / normalize_to
 	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
 		lines = []
 		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
@@ -1380,7 +1404,9 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False, sizes=[1000,500]): #Subtract continuum and background with an iterative running median
+	def subtract_continuum(self, show = False, size=0, sizes=[1000,500]): #Subtract continuum and background with an iterative running median
+		if size != 0:
+			sizes = [size]
 		orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
 				flux = copy.deepcopy(order.flux)
@@ -1638,6 +1664,21 @@ class spec1d:
 			print 'All Lines Median FWHM = ', median(all_fwhm)
 			print 'All Lines Mean FWHM = ', mean(all_fwhm)
 			print 'All Lines std-dev FWHM = ', std(all_fwhm)
+	def c_deredden(self, c_value): #Deredden spectrum with a value of "c" measured for H-beta from the literature, while assuming the extinction law of Rieke & Lebofsky (1985)		
+		#A_lambda = array([1.531, 1.324, 1.000, 0.748, 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+		#l = array([ 0.365, 0.445, 0.551, 0.658, 0.806,  1.22 ,  1.63 , 2.19 , 3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+		#extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+		A_V = 0.83446 * 2.5 * c_value #Calcualte A_V from c(h-beta), use linearly interolated A_V/A_hbeta from Rieke & Lebofsky (1985)
+		A_K = 0.118 * A_V #Convert A_V to A_K from Fitspatrick (1998)
+		#a = 2.14 #extinction curve in the form of a power law from Stead and Hoare (2009)
+		a = 1.8
+		A_lambda = A_K * self.combospec.wave**(-a) / 2.19**(-a) #Calculate an extinction correction
+		#h.F *= 10**(0.4*A_lambda) #Apply extinction correction
+		#dereddening = 10**(0.4*extinction_curve(self.combospec.wave)*A_V) #Calculate dereddening as a function of wavelength
+		#self.combospec.flux = self.combospec.flux * dereddening #Apply dereddening to flux and noise
+		#self.combospec.noise = self.combospec.noise * dereddening
+		self.combospec.flux = self.combospec.flux * 10**(0.4*A_lambda) #Apply dereddening to flux and noise
+		self.combospec.noise = self.combospec.noise * 10**(0.4*A_lambda)
 
 		
 
@@ -1821,7 +1862,9 @@ class spec2d:
 					#legend()
 				#else:
 					#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
-	def subtract_continuum(self, show = False, sizes=[500], use_combospec=False): #Subtract continuum and background with an iterative running median
+	def subtract_continuum(self, show = False, size=0, sizes=[500], use_combospec=False): #Subtract continuum and background with an iterative running median
+		if size != 0:
+			sizes = [size]
 		if use_combospec: #If user specifies to use combined spectrum
 			orders = [self.combospec] #Use the combined spectrum
 		else: #But is usually better to use individual orders instead
@@ -1979,6 +2022,22 @@ class spec2d:
 		B = E_BV #and assuming B mag is the difference between V and B magnitudes E(B-V)
 		self.combospec.flux = redden(B, V, self.combospec.wave, self.combospec.flux) #Artificially deredden flux
 		self.combospec.noise = redden(B, V, self.combospec.wave, self.combospec.noise) #Artificially scale noise to match S/N of dereddened flux
+	def c_deredden(self, c_value): #Deredden spectrum with a value of "c" measured for H-beta from the literature, while assuming the extinction law of Rieke & Lebofsky (1985)		
+		#A_lambda = array([1.531, 1.324, 1.000, 0.748, 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
+		#l = array([ 0.365, 0.445, 0.551, 0.658, 0.806,  1.22 ,  1.63 , 2.19 , 3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
+		#extinction_curve = interp1d(l, A_lambda, kind='quadratic') #Create interpolation object for extinction curve from Rieke & Lebofsky (1985)
+		#A_V = 0.83446 * 2.5 * c_value #Calcualte A_V from c(h-beta), use linearly interolated A_V/A_hbeta from Rieke & Lebofsky (1985)
+		A_V = 2.387 * c_value #Calcualte A_V from c(h-beta), use value given on page 179 of Osterbrock & Ferland 2nd ed at the end of the first paragraph.
+		A_K = 0.118 * A_V #Convert A_V to A_K from Fitspatrick (1998)
+		#a = 2.14 #extinction curve in the form of a power law from Stead and Hoare (2009)
+		a = 1.8
+		A_lambda = A_K * self.combospec.wave**(-a) / 2.19**(-a) #Calculate an extinction correction
+		#h.F *= 10**(0.4*A_lambda) #Apply extinction correction
+		#dereddening = 10**(0.4*extinction_curve(self.combospec.wave)*A_V) #Calculate dereddening as a function of wavelength
+		#self.combospec.flux = self.combospec.flux * dereddening #Apply dereddening to flux and noise
+		#self.combospec.noise = self.combospec.noise * dereddening
+		self.combospec.flux = self.combospec.flux * 10**(0.4*A_lambda) #Apply dereddening to flux and noise
+		self.combospec.noise = self.combospec.noise * 10**(0.4*A_lambda)
 
 
 		
