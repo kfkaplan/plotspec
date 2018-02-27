@@ -1944,6 +1944,18 @@ class spec2d:
 							trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
 							flux[:,i] -= trace
 				order.flux = flux
+	def fill_nans(size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size, done with the combined spectrum combospec
+		ny = self.ny
+		half_size = (size-1)/2 #Get +/- number of pixels for the size
+		for i in xrange(ny):
+			y1, y2 = i - half_size, i+half_size #Get top and bottom indicies
+			if y1 < 0: y1=0
+			if y2 > ny: y2 = ny
+			nanmedian_row_flux = nanmedian(self.combospec.flux[y1:y2, :], axis=0) #Grab nanmedian flux and variance values for current row
+			nanmedian_row_var = nanmedian(self.combospec.flux[y1:y2, :], axis=0)
+			find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
+			self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
+			self.combospec.var[i, :][find_nans] = nanmedian_row_var[find_nans]
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
