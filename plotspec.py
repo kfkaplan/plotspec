@@ -34,8 +34,10 @@ except ImportError:
 import matplotlib.gridspec as grd
 
 #Global variables user should set
-pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
-save_path = '/Volumes/IGRINS_Data/results/'
+pipeline_path = '/Volumes/home/plp/'
+save_path = '/Volumes/home/results/'
+#pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
+#save_path = '/Volumes/IGRINS_Data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
 #pipeline_path = '/Volumes/IGRINS_data_Backup/plp/'
 #save_path = '/Volumes/IGRINS_data_Backup/results/' #Define path for saving temporary files'
@@ -132,10 +134,24 @@ def flat_nanmin(input):
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~Code for modifying spectral data~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#Roll an array (typically an order) an arbitrary number of pixels (via interpolation for fractions of a pixel)
+#@jit #Compile Just In Time using numba, for speed up
+def roll_interp(array_to_correct, correction, axis=0):
+	integer_correction = int(correction) #grab whole number component of correction
+	fractional_correction = correction - float(integer_correction) #Grab fractional component of correction (remainder after grabbing whole number out)
+	rolled_array =  roll(array_to_correct, integer_correction, axis=axis) #role array the number of pixels matching the integer correction
+	if fractional_correction > 0.: #For a positive correction
+		rolled_array_plus_one = roll(array_to_correct, integer_correction+1, axis=axis) #Roll array an extra one pixel to the right
+	else: #For a negative correction
+		rolled_array_plus_one = roll(array_to_correct, integer_correction-1, axis=axis) #Roll array an extra one pixel to the left
+	corrected_array = rolled_array*(1.0-abs(fractional_correction)) + rolled_array_plus_one*abs(fractional_correction) #interpolate over the fraction of a pixel
+	#stop()
+	return corrected_array
+
 #Do a quick preview of a 2D array in DS9
 def quicklook(arr, pause=False, close=False): 
 		spec_fits = fits.PrimaryHDU(arr) #Create FITS object
-		spec_fits.writeto(save.path + 'quicklook.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
+		spec_fits.writeto(save.path + 'quicklook.fits', overwrite=True)    #Save temporary fits files for later viewing in DS9
 		ds9.open()  #Display spectrum in DS9
 		ds9.show(save.path + 'quicklook.fits', new=False)
 		ds9.set('zoom to fit')
@@ -252,7 +268,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 		interpolated_vega_lines_0 =  intepolate_vega_lines(waves) #Grab interpoalted lines once			
 		if y_sharpen[1] > 0.: #If user specifies they want to sharpen the H I lines in the synthetic Vega spectrum, smaller sharp numbers will sharpen the lines more, best to start with a very large number
 			g = Gaussian1DKernel(stddev = y_sharpen[1]) #Set up gaussian smoothing for Vega I lines, here sharp = std deviation in pixels of gaussian used for smoothing
-			smooothed_interpolated_vega_lines	= convolve(continuum_normalized_vega_flux, g) - 1.0 #Smooth the vega lines, subtract one to put continuum for the smoothed liens on the x axis
+			smooothed_interpolated_vega_lines	= convolve(continuum_normalized_vega_flux, g) - 1.0 #Smooth the vega lines, subtract one to put conhttp://www.u.arizona.edu/~kfkaplan/hpf/20180129/figures/0004.Slope-20180129T014837_R01.optimal.pngtinuum for the smoothed liens on the x axis
 			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[1] * ((continuum_normalized_vega_flux-smooothed_interpolated_vega_lines)**y_power[1]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
 		else: #Ignore sharpening and just use the old method (most common action taken)
 			intepolate_vega_lines = interp1d(vega_wave, 1.0 + y_scale[1] * (continuum_normalized_vega_flux**y_power[1]-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
@@ -536,17 +552,27 @@ class position_velocity:
 			ylabel('Relative Flux', fontsize=fontsize) #Or just label y-axis as relative flux 
 		#draw()
 		#show()
-	def save_fits(self, name='pv'): #Save fits file of PV diagrams
-		pv_file = fits.PrimaryHDU(self.pv) #Set up fits file object
+	def save_fits(self, name='pv', dim=2, type='flux'): #Save fits file of PV diagrams
+		if type == 'flux' and dim == 2: #If user specifies 2D flux (default)
+			pv_file = fits.PrimaryHDU(self.pv) #Set up fits file object to hold 2D flux
+		elif type == 'var' and dim == 2: #If user specifies 2D variance
+			pv_file = fits.PrimaryHDU(self.var2d) #Set up fits file object to hold 2D variance
+		elif type == 'flux' and dim == 1: #If user specifies 1D flux
+			pv_file = fits.PrimaryHDU(self.flux)
+		elif type == 'var' and dim == 1: #If user specifies 1D variance
+			pv_file = fits.PrimaryHDU(self.var1d)
+		else: #Report error
+			print 'ERROR: Type '+ type + ' or dimension' + str(dim) + 'for saving fits file not correctly specified.'
 		#Add WCS for linear interpolated velocity
 		pv_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
 		pv_file.header['CRPIX1'] = (self.velocity_range / self.velocity_res) + 1 #Set zero point to where v=0 km/s (middle of stamp)
 		pv_file.header['CDELT1'] = self.velocity_res #Set zero point to where v=0 km/s (middle of stamp)
 		pv_file.header['CUNIT1'] = 'km/s' #Set label for x axis to be km/s
-		pv_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
-		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
-		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
-		pv_file.writeto(save.path + name +'.fits', clobber  = True) #Save fits file
+		if dim == 2:
+			pv_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
+			pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
+			pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
+		pv_file.writeto(save.path + name +'.fits', overwrite  = True) #Save fits file
 		# 	s2n_file = fits.PrimaryHDU(self.s2n) #Set up fits file object
 		# 	#Add WCS for linear interpolated velocity
 		# 	s2n_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
@@ -556,8 +582,8 @@ class position_velocity:
 		# 	s2n_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
 		# 	s2n_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		# 	s2n_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
-		# 	s2n_file.writeto(scratch_path + 'pv_s2n.fits', clobber  = True) #Save fits file
-	def save_var(self): #Save fits file of PV diagrams variance
+		# 	s2n_file.writeto(scratch_path + 'pv_s2n.fits', overwrite  = True) #Save fits file
+	def save_var(self, name='pv_var2d'): #Save fits file of PV diagrams variance, OLD!   USE def save_fits above, kept here for compatibility
 		pv_file = fits.PrimaryHDU(self.var2d) #Set up fits file object
 		#Add WCS for linear interpolated velocity
 		pv_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
@@ -567,7 +593,7 @@ class position_velocity:
 		pv_file.header['CTYPE2'] = 'Slit Position' #Set unit for slit length to something generic
 		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
-		pv_file.writeto(save.path + 'pv_var2d.fits', clobber  = True) #Save fits file
+		pv_file.writeto(save.path + name + '.fits', overwrite  = True) #Save fits file
 	def getline(self, line): #Grabs PV diagram for a single line given a line label
 		i =  where(self.label == line)[0][0] #Search for line by label
 		return self.pv[i] #Return line found
@@ -805,6 +831,25 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				#print 'nansum(on_data) = ', nansum(on_data)
 				#print 'background = ', background
 			elif optimal_extraction: #Okay if the user specifies to use optimal extraction now that we know how the weights have been shifted to maximize S/N
+				### Horne 1986 optimal extraction method, tests show it doesn't work so well as the weighting scheme below so it's commented out, left here if I wever want to revivie it
+				# p = sqrt(shifted_weights)
+				# p = p - nanmedian(p)
+				# p[p < 0.] = 0.
+				# p = p / nansum(p)
+				# v = pv_variance[i,:,:]
+				# f = pv_data[i,:,:]
+				# s = nanmedian(f[p == 0.0])
+				# m = ones(pv_shape) 
+				# #sigma_clip_bad_pix = (f - s - nansum(f-s)*p)**2 > 10.0**2 * v
+				# #m[sigma_clip_bad_pix] = 0.
+				# p_squared_divided_by_v = nansum(m * p**2 / v)
+				# try:
+				# 	line_flux[i] = nansum((m * p * (f-s)) / v) / p_squared_divided_by_v
+				# 	line_sigma[i] = sqrt( nansum((m*p)) / p_squared_divided_by_v  )
+				# except:
+				# 	line_flux[i] = nan
+				# 	line_sigma[i] = nan
+				### Current version of the extraction, appears to work best
 				background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
 				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
 				weighted_variance  = pv_variance[i,:,:] * shifted_weights**2 #And extract the weighted variance
@@ -1938,8 +1983,8 @@ class spec2d:
 			spec_fits = fits.PrimaryHDU(self.combospec.s2n())
 		else: #You will view the flux
 			spec_fits = fits.PrimaryHDU(self.combospec.flux)
-		wave_fits.writeto(save.path + 'longslit_wave.fits', clobber=True)    #Save temporary fits files for later viewing in DS9
-		spec_fits.writeto(save.path + 'longslit_spec.fits', clobber=True)
+		wave_fits.writeto(save.path + 'longslit_wave.fits', overwrite=True)    #Save temporary fits files for later viewing in DS9
+		spec_fits.writeto(save.path + 'longslit_spec.fits', overwrite=True)
 		ds9.open()  #Display spectrum in DS9
 		self.make_label2d(spec_lines, label_lines = True, label_wavelength = True, label_OH = label_OH, num_wave_labels = num_wave_labels) #Label 2D spectrum,
 		ds9.show(save.path + 'longslit_wave.fits', new=False)
@@ -2203,7 +2248,7 @@ def plot_2d(image, open = True, new = False, close = True):
 	if open: #Open DS9 typically
 		ds9.open() #Open DS9
 	show_file = fits.PrimaryHDU(image) #Set up fits file object
-	show_file.writeto(scratch_path + 'plot_2d.fits', clobber = True) #Save fits file
+	show_file.writeto(scratch_path + 'plot_2d.fits', overwrite = True) #Save fits file
 	ds9.show(scratch_path + 'plot_2d.fits', new = new) #Show image
 	ds9.set('zoom to fit')
 	ds9.set('scale log') #Set view to log scale

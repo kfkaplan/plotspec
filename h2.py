@@ -21,7 +21,8 @@ lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction
 wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
-cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
+cloudy_dir = '/Volumes/home/CLOUDY/'
+#cloudy_dir = '/Volumes/IGRINS_Data/CLOUDY/'
 #cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
 cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
 energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
@@ -675,7 +676,12 @@ class emissivity:
     #             pdf.savefig() #Output page of pdf
 
 
-
+#Class that stores the tree data object of all the indicies giong into a transition, and the indicies going into the next transition, and so on and so forth, ect.
+class tree():
+	def __init__(self, v, J): #Define the seed for the transition tree
+		branches = [] #Holds transition indicies for all 
+		self.v = v
+		self.J = J
 
 
 					
@@ -710,6 +716,10 @@ class h2_transitions:
 		self.sig_rot_T = zeros(n_lines) #Store uncertainity in rotation temperature fit
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
+	def tin(self, v, J): #Find and return indicies of transitions into a given level defined by v and J
+		return (self.V.l == v) & (self.J.l == J)
+	def tout(self, v, J): #FInd and return indicies of transitions out of a given level defined by v and J(self.V.u == v) & (self.J.u == J)
+		return (self.V.u == v) & (self.J.u == J)
 	def calculate_column_density(self, normalize=True): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
 		##self.N = self.F / (self.g * self.E.u * h * c * self.A)
 		##self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
