@@ -594,6 +594,18 @@ class position_velocity:
 		pv_file.header['CRPIX2'] = 1 #Set zero point to 0 pixel for slit length
 		pv_file.header['CDELT2'] = 1.0 / self.slit_pixel_length #Set slit length to go from 0->1 so user knows what fraction from the bottom they are along the slit
 		pv_file.writeto(save.path + name + '.fits', overwrite  = True) #Save fits file
+	def read_fits(self, filename='pv.fits', dim=2, type='flux'): #Read in a saved pv.fits (saved with  safe_fits) file that has been modified externally and overwrite flux/variance variable in this object
+		input_data = fits.getdata(filename)
+		if type == 'flux' and dim == 2: #If user specifies 2D flux (default)
+			self.pv = input_data
+		elif type == 'var' and dim == 2: #If user specifies 2D variance
+			self.var2d = input_data
+		elif type == 'flux' and dim == 1: #If user specifies 1D flux
+			self.flux = input_data
+		elif type == 'var' and dim == 1: #If user specifies 1D variance
+			self.var1d = input_data
+		else: #Report error
+			print 'ERROR: Type '+ type + ' or dimension' + str(dim) + 'for reading fits file not correctly specified.'
 	def getline(self, line): #Grabs PV diagram for a single line given a line label
 		i =  where(self.label == line)[0][0] #Search for line by label
 		return self.pv[i] #Return line found
