@@ -1492,10 +1492,9 @@ class spec1d:
 			orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
 				flux = copy.deepcopy(order.flux)
-				#whole_order_trace = nanmedian(flux)
-				#whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
-				#flux = flux - whole_order_trace #Do an intiial removal of the flux
-				ny, nx = shape(flux) 
+				whole_order_trace = nanmedian(flux)
+				flux = flux - whole_order_trace #Do an intiial removal of the flux
+				nx = len(flux) 
 				for size in sizes:
 					if size%2 == 0: size = size + 1 #Get rid of even sizes and replace with an odd version
 					half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
@@ -1507,8 +1506,9 @@ class spec1d:
 						elif x_right > nx:
 							x_right = nx
 						trace = nanmedian(unmodified_flux[x_left:x_right])
-						trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
-						flux[:,i] -= trace
+						if isnan(trace): #Zero out nans or infinities or other wierd things
+							trace = 0.
+						flux[i] -= trace
 				order.flux = flux
 	def old_subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
@@ -1542,7 +1542,6 @@ class spec1d:
 			order.flux = subtracted_flux #Replace this order's flux array with one that has been continuum subtracted
 		if show: #If you want to watch the continuum subtraction
 			legend() #Show the legend in the plot
-
 	def normalize_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Normalize spectrum to continuum using robust running median
 		for order in self.orders: #Apply continuum subtraction to each order seperately
 			old_order = copy.deepcopy(order) #Make copy of flux array so the original is not modified
