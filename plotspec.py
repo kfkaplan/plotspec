@@ -1986,7 +1986,7 @@ class spec2d:
 			nanmedian_row_var = nanmedian((self.combospec.noise[y1:y2, :])**2, axis=0)
 			find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
 			self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
-			self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]
+			self.combospec.noise[i, :][find_nans] = sqrt(nanmedian_row_var[find_nans])
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
