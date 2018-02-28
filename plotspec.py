@@ -1968,13 +1968,13 @@ class spec2d:
 							if x_left < 0:
 							    x_left = 0
 							elif x_right > nx:
-			                	x_right = nx
+								x_right = nx
 							trace = nanmedian(unmodified_flux[:,x_left:x_right], axis=1)
 							trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
 							flux[:,i] -= trace
 				order.flux = flux
 	def fill_nans(self, size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size on a column by column basis, done with the combined spectrum combospec
-		ny = self.ny
+		ny = self.slit_pixel_length
 		half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')
 		#half_size = (size-1)/2 #Get +/- number of pixels for the size
 		for i in xrange(ny):
@@ -1983,10 +1983,10 @@ class spec2d:
 			if y1 < 0: y1=0
 			if y2 > ny: y2 = ny
 			nanmedian_row_flux = nanmedian(self.combospec.flux[y1:y2, :], axis=0) #Grab nanmedian flux and variance values for current row
-			nanmedian_row_var = nanmedian(self.combospec.flux[y1:y2, :], axis=0)
+			nanmedian_row_var = nanmedian((self.combospec.noise[y1:y2, :])**2, axis=0)
 			find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
 			self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
-			self.combospec.var[i, :][find_nans] = nanmedian_row_var[find_nans]
+			self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
@@ -2215,15 +2215,6 @@ class lines:
 def robust_median_filter(input_flux, size = half_block):
 	if size%2 == 0: size = size+1 #Make even results odd
 	half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
-					for i in xrange(nx):
-						x_left, x_right = i + half_sizes
-						if x_left < 0:
-							x_left = 0
-						elif x_right > nx:
-							x_right = nx
-
-
-
 	flux = copy.deepcopy(input_flux)
 	if ndim(flux) == 2: #For 2D spectrum
 		ny, nx = shape(flux) #Calculate npix in x and y
