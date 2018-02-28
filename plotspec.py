@@ -1492,9 +1492,9 @@ class spec1d:
 			orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
 				flux = copy.deepcopy(order.flux)
-				whole_order_trace = nanmedian(flux)
-				whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
-				flux = flux - whole_order_trace #Do an intiial removal of the flux
+				#whole_order_trace = nanmedian(flux)
+				#whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
+				#flux = flux - whole_order_trace #Do an intiial removal of the flux
 				ny, nx = shape(flux) 
 				for size in sizes:
 					if size%2 == 0: size = size + 1 #Get rid of even sizes and replace with an odd version
