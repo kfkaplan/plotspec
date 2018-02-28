@@ -1461,28 +1461,55 @@ class spec1d:
 			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
-	def subtract_continuum(self, show = False, size=0, sizes=[1000,500]): #Subtract continuum and background with an iterative running median
+	# def subtract_continuum(self, show = False, size=0, sizes=[1000,500]): #Subtract continuum and background with an iterative running median
+	# 	if size != 0:
+	# 		sizes = [size]
+	# 	orders = self.orders
+	# 	for order in orders: #Apply continuum subtraction to each order seperately
+	# 			flux = copy.deepcopy(order.flux)
+	# 			whole_order_trace = nanmedian(flux)
+	# 			if whole_order_trace == nan: whole_order_trace = 0.
+	# 			flux = flux - whole_order_trace #Do an intiial removal of the flux
+	# 			nx = len(flux) 
+	# 			for size in sizes:
+	# 				x_left = arange(nx) - size #Create array to store left side of running median
+	# 				x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
+	# 				x_right = arange(nx) + size #Create array to store right side of running median
+	# 				x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
+	# 				#x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
+	# 				unmodified_flux = copy.deepcopy(flux)	
+	# 				for i in xrange(nx):
+	# 						trace = nanmedian(unmodified_flux[x_left[i]:x_right[i]])
+	# 						if trace == nan: trace = 0.
+	# 						flux[i] -= trace
+	# 			order.flux = flux	
+	def subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
 		if size != 0:
 			sizes = [size]
-		orders = self.orders
+		if use_combospec: #If user specifies to use combined spectrum
+			orders = [self.combospec] #Use the combined spectrum
+		else: #But is usually better to use individual orders instead
+			orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
 				flux = copy.deepcopy(order.flux)
 				whole_order_trace = nanmedian(flux)
-				if whole_order_trace == nan: whole_order_trace = 0.
+				whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
 				flux = flux - whole_order_trace #Do an intiial removal of the flux
-				nx = len(flux) 
+				ny, nx = shape(flux) 
 				for size in sizes:
-					x_left = arange(nx) - size #Create array to store left side of running median
-					x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
-					x_right = arange(nx) + size #Create array to store right side of running median
-					x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
-					x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
+					if size%2 == 0: size = size + 1 #Get rid of even sizes and replace with an odd version
+					half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
 					unmodified_flux = copy.deepcopy(flux)	
 					for i in xrange(nx):
-							trace = nanmedian(unmodified_flux[x_left[i]:x_right[i]])
-							if trace == nan: trace = 0.
-							flux[i] -= trace
-				order.flux = flux	
+						x_left, x_right = i + half_sizes
+						if x_left < 0:
+							x_left = 0
+						elif x_right > nx:
+							x_right = nx
+						trace = nanmedian(unmodified_flux[x_left:x_right])
+						trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
+						flux[:,i] -= trace
+				order.flux = flux
 	def old_subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
@@ -1919,7 +1946,7 @@ class spec2d:
 					#legend()
 				#else:
 					#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
-	def subtract_continuum(self, show = False, size=0, sizes=[500], use_combospec=False): #Subtract continuum and background with an iterative running median
+	def subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
 		if size != 0:
 			sizes = [size]
 		if use_combospec: #If user specifies to use combined spectrum
@@ -1933,22 +1960,26 @@ class spec2d:
 				flux = flux - whole_order_trace[:,newaxis] #Do an intiial removal of the flux
 				ny, nx = shape(flux) 
 				for size in sizes:
-					x_left = arange(nx) - size #Create array to store left side of running median
-					x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
-					x_right = arange(nx) + size #Create array to store right side of running median
-					x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
-					x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
+					if size%2 == 0: size = size + 1 #Get rid of even sizes
+					half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
 					unmodified_flux = copy.deepcopy(flux)	
 					for i in xrange(nx):
-							trace = nanmedian(unmodified_flux[:,x_left[i]:x_right[i]], axis=1)
+							x_left, x_right = i + half_sizes
+							if x_left < 0:
+							    x_left = 0
+							elif x_right > nx:
+			                	x_right = nx
+							trace = nanmedian(unmodified_flux[:,x_left:x_right], axis=1)
 							trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
 							flux[:,i] -= trace
 				order.flux = flux
-	def fill_nans(size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size, done with the combined spectrum combospec
+	def fill_nans(self, size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size on a column by column basis, done with the combined spectrum combospec
 		ny = self.ny
-		half_size = (size-1)/2 #Get +/- number of pixels for the size
+		half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')
+		#half_size = (size-1)/2 #Get +/- number of pixels for the size
 		for i in xrange(ny):
-			y1, y2 = i - half_size, i+half_size #Get top and bottom indicies
+			#y1, y2 = i - half_size, i+half_size #Get top and bottom indicies
+			y1, y2 = i + half_sizes #Get top and bottom indicies
 			if y1 < 0: y1=0
 			if y2 > ny: y2 = ny
 			nanmedian_row_flux = nanmedian(self.combospec.flux[y1:y2, :], axis=0) #Grab nanmedian flux and variance values for current row
@@ -2182,23 +2213,39 @@ class lines:
 #~~~~~~~~~~~~~~~~~~~~~~~~Do a robost running median filter that ignores nan values and outliers, returns result in 1D~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #@jit #Compile Just In Time with numba
 def robust_median_filter(input_flux, size = half_block):
+	if size%2 == 0: size = size+1 #Make even results odd
+	half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
+					for i in xrange(nx):
+						x_left, x_right = i + half_sizes
+						if x_left < 0:
+							x_left = 0
+						elif x_right > nx:
+							x_right = nx
+
+
+
 	flux = copy.deepcopy(input_flux)
 	if ndim(flux) == 2: #For 2D spectrum
 		ny, nx = shape(flux) #Calculate npix in x and y
 	else: #Else for 1D spectrum
 		nx = len(flux) #Calculate npix
 	median_result = zeros(nx) #Create array that will store the smoothed median spectrum
-	x_left = arange(nx) - size #Create array to store left side of running median
-	x_left[x_left < 0] = 0 #Set pixels beyond edge of order to be nonexistant
-	x_right = arange(nx) + size #Create array to store right side of running median
-	x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
-	x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction
 	if ndim(flux) == 2: #Run this loop for 2D
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
-			median_result[i] = nanmedian(flux[:,x_left[i]:x_right[i]]) #Calculate median between x_left and x_right for a given pixel
+			x_left, x_right = i + half_sizes
+			if x_left < 0:
+				x_left = 0
+			elif x_right > nx:
+				x_right = nx
+			median_result[i] = nanmedian(flux[:,x_left:x_right]) #Calculate median between x_left and x_right for a given pixel
 	else: #Run this loop for 1D
 		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
-			median_result[i] = nanmedian(flux[x_left[i]:x_right[i]])  #Calculate median between x_left and x_right for a given pixel
+			x_left, x_right = i + half_sizes
+			if x_left < 0:
+				x_left = 0
+			elif x_right > nx:
+				x_right = nx
+			median_result[i] = nanmedian(flux[x_left:x_right])  #Calculate median between x_left and x_right for a given pixel
 	return median_result
 
 #~~~~~~~~~~~~~Mask out lines based on some velocity range, used for not including wide lines in continuum subtraction~~~~~~~~~~~~~~~~~~~~~~~~
