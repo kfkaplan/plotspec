@@ -1,6 +1,6 @@
 #Test demo script for make_datacube.py library
 from scipy import *
-import makedatacube as cubelib #Import library to make datacubes
+import make_datacube as cubelib #Import library to make datacubes
 
 workdir =  '/Volumes/IGRINS_Data/datacube_demo/' #Set to where you want to save resulting fits files
 vrange = [-10.0,10.0] #Velocity range

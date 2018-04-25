@@ -1,0 +1,31 @@
+## This file contains all the necessary information to build a datacube from many different IGRINS pointings
+# It can easily handle observations taken on different nights, but the user must take care to ensure the parameter
+# for each pointing is correct.
+#
+# 1: Date = civil date of observation in YYYMMDD (ex. 20150722), name of directory for raw data files
+# 2: Frame # = number of first frame of a single pointing
+# 3: PA = Position angle, the PA of the first frame is the PA of the entire datacube, other PAs can only be different by 90 degrees
+# 4: X shift = Shift in x-direction perpendicular to the first slit, in arcseconds, typically this is in 1 arcsecond steps
+# 5: Y shift = Shift in y-direction parallel to the first slit, in arcseconds, typically 0 but can change depending on pointing error or multiple maps being combined
+# 6: Exp = Relative exposure, use to correct for differences in exposure time, or for relative flux calibration, Example:: 2.0 means exposure time was double the rest of the
+# 7: Std # = number of frame for A0V standard star to use
+# 8: Wave # = number of frame for wavelength solution (typically you want to use the sky frame used wavelength solution correction by OH lines, but ThAr frame can be used)
+# 9: A0V V = V magnitude of A0V standard star, used for reddening correction
+# 10: A0V B = B magnitude of A0V standard star, used for reddening correction
+# 11: A0V HI Scale = Scale of H I absorption lines in synthetic A0V stanadard star spectrum relative to Vega, check output "check_flux_calib.pdf" in results directory
+# 12: A0V smoothing = Gaussian smoothing of H I absorption lines in synthetic A0V stanadard star spectrum in wavelength space, check output "check_flux_calib.pdf" in results directory
+# 13: Spectral line file = File name of line list to use
+# 14: Delta v = Shift in velocity (relative to observatory) of spectral lines for target
+# 15: v shift file = File storing shifts of individual lines, can be used to correct imperfect wavelength calibration, set to '-' to ignore this
+# 16: Block definining how independant flux calibraiotns are done.  Blocks are first flux calibrated against the pointings inside each block then the blocks are flux calibrated against each other, in the input order
+#
+#1			2	3	4	5	6	7	8		9		10		11	12					13	14 15 16
+Date 	FrameNo	PA	X_Shift	Y_Shift	Exp	StdNo WaveNo	A0V_V	A0V_B	A0V_HI_Scale	A0V_Smooth	Spec_Line_File	Delta_V	V_Shift_File	Block
+#Actual datacube
+20141125	120	135.0	0.0	0.0	3.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1
+20161230	85	45.0	0.0	0.0	7.0	99	99	5.515	5.500	1.0	0.0	H2_demo.dat	10.0	-	1
+20141125	119	135.0	-1.0	0.0	1.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1
+20141125	123	135.0	-2.0	0.0	1.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1
+20141125	121	135.0	1.0	0.0	1.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1
+20141125	125	135.0	2.0	0.0	1.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1
+20141125	133	135.0	3.0	0.0	1.0	126	118	6.410	6.412	0.85	1.0	H2_demo.dat	8.0	-	1

@@ -676,12 +676,6 @@ class emissivity:
     #             pdf.savefig() #Output page of pdf
 
 
-#Class that stores the tree data object of all the indicies giong into a transition, and the indicies going into the next transition, and so on and so forth, ect.
-class tree():
-	def __init__(self, v, J): #Define the seed for the transition tree
-		branches = [] #Holds transition indicies for all 
-		self.v = v
-		self.J = J
 
 
 					
@@ -717,9 +711,9 @@ class h2_transitions:
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
 	def tin(self, v, J): #Find and return indicies of transitions into a given level defined by v and J
-		return (self.V.l == v) & (self.J.l == J)
+		return where((self.V.l == v) & (self.J.l == J))
 	def tout(self, v, J): #FInd and return indicies of transitions out of a given level defined by v and J(self.V.u == v) & (self.J.u == J)
-		return (self.V.u == v) & (self.J.u == J)
+		return where((self.V.u == v) & (self.J.u == J))
 	def calculate_column_density(self, normalize=True): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
 		##self.N = self.F / (self.g * self.E.u * h * c * self.A)
 		##self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
@@ -1567,8 +1561,39 @@ class h2_transitions:
 		self.F *= 10**(0.4*A_lambda) #Apply extinction correction
 		self.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
 		self.A_K = best_fit_A_K #Store extinction paramters in case user wants to inspect or tabulate them later
-		self.alpha = best_fit_alpha 
+		self.alpha = best_fit_alpha
+	# def find_cascade(v_u, j_u, v_l, j_l): #Find all possible paths between two levels
+	# 	found_transitions = self.tout(v_up, j_up) #Find all transitions out of the upper level
+
+	# 	for i in xrange(len(v_l_trans)):
+	# 		if v_l_trans == v_l and j_l_trans == j_l
+	# 	for found_transition in found_transitions: #Loop through each transition found
+	# 		if self.v.l[found_transition] == v_l and 
+	# 		XXXXX.append(find_cascade
+
  
+class transition_node:
+	def __init__(self, h2_obj, v, J, itercount=0, wave_range=[0.,0.]):
+		#if itercount < 50:
+			print 'itercont = ', itercount, '   v = ', v , ' J = ', J
+			touts = h2_obj.tout(v, J)
+			n  = size(touts)
+			if n > 0:
+				children = []
+				v_out, J_out, wave = h2_obj.V.l[touts], h2_obj.J.l[touts], h2_obj.wave[touts]
+				for i in xrange(n):
+					if (wave_range[0] == 0. and wave_range[1] == 0.) or (wave[i] >= wave_range[0] and wave[i] <= wave_range[1]):
+						print 'found transition ', h2_obj.label[touts][i], ' wavelength=', h2_obj.wave[touts][i]
+						children.append(transition_node(h2_obj, v_out[i], J_out[i], itercount + 1, wave_range=wave_range))
+				self.v = v
+				self.J = J
+				self.i = touts
+				self.children = children
+				self.last = False
+			else:
+				self.last = True
+				print 'Looks like that is the last of one set of tranistions.'
+
 
 class density_surface(): #Fit surface in v and J space, save object to store surface
 	def __init__(self, h2_obj, s2n_cut=-1.0):

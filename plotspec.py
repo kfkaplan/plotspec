@@ -361,7 +361,8 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 			#relative_flux_calibration = (std_flux * (telluric_flux**(telluric_power-1.0))/ interpolated_a0v_synth_spec)				
 			relative_flux_calibration = std_flux / interpolated_a0v_synth_spec
 		#s2n =  1.0/sqrt(sci.orders[i].s2n()**-2 + std.orders[i].s2n()**-2)  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
-		s2n =  1.0/sqrt((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+		#s2n =  1.0/sqrt((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+		s2n =  ((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))**-0.5  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
 		if not no_flux: #As long as user does not specify doing a flux calibration
 			sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
 		sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
@@ -521,7 +522,7 @@ class position_velocity:
 			clf() #Clear plot space
 		velocity = self.velocity
 		flux = self.flux[line_index] * scale_flux #Scale flux so numbers are not so big
-		noise = sqrt(self.var1d[line_index]) * scale_flux
+		noise = self.var1d[line_index]**0.5 * scale_flux
 		max_flux = nanmax(flux + noise, axis=0) #Find maximum flux in slice of spectrum
 		fill_between(velocity, flux - noise, flux + noise, facecolor = uncertainity_color, linestyle=uncertainity_line) #Fill in space between data and +/- 1 sigma uncertainity
 		plot(velocity, flux, color='black') #Plot 1D spectrum slice
@@ -656,7 +657,7 @@ class position_velocity:
 		if s2n_cut > 0.:
 			g = Gaussian2DKernel(stddev=s2n_smooth)
 			for i in xrange(len(pv)):
-				low_s2n_mask = convolve(pv[i], g) / sqrt(self.var2d[i]) < s2n_cut
+				low_s2n_mask = convolve(pv[i], g) / self.var2d[i]**0.5 < s2n_cut
 				pv[i][low_s2n_mask] = nan
 		if prange[0] == 0 and prange[1] == 0: #If user does not specify prange explicitely 
 			prange = [0, self.slit_pixel_length] #Set to use the whole slit by default
@@ -681,11 +682,11 @@ class position_velocity:
 		position = arange(self.slit_pixel_length)
 		for i in xrange(len(self.pv)): #Loop through each line
 			for j in xrange(len(self.velocity)): #Loop through each position along the slit
-				three_sigma_range = (position < self.position_mean[i,j]+sigma*sqrt(self.position_variance[i,j])) & (position > self.position_mean[i,j]-sigma*sqrt(self.position_variance[i,j])) #Find +/- 3 sigma from mean
+				three_sigma_range = (position < self.position_mean[i,j]+sigma*self.position_variance[i,j]**0.5) & (position > self.position_mean[i,j]-sigma*self.position_variance[i,j]**0.5) #Find +/- 3 sigma from mean
 				position_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
 				combined_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
 			for k in xrange(len(position)): #Loop through each velocity resoultion element
-				three_sigma_range = (self.velocity < self.velocity_mean[i,k]+sigma*sqrt(self.velocity_variance[i,k])) &  (self.velocity > self.velocity_mean[i,k]-sigma*sqrt(self.velocity_variance[i,k]))#Find +/- 3 sigma from mean
+				three_sigma_range = (self.velocity < self.velocity_mean[i,k]+sigma*self.velocity_variance[i,k]**0.5) &  (self.velocity > self.velocity_mean[i,k]-sigma*self.velocity_variance[i,k]**0.5)#Find +/- 3 sigma from mean
 				velocity_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
 				combined_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
 		self.velocity_moment_mask = velocity_moment_mask #Store the moment masks
@@ -712,7 +713,7 @@ def fit_mask(mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal
 		shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
 		shifted_mask = shifted_mask_contours == 1.0 #Create new maskf from shifted mask countours
 		flux = nansum(smoothed_data[shifted_mask]) - nanmedian(smoothed_data[~shifted_mask])*size(smoothed_data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
-		sigma =  sqrt( nansum(variance[shifted_mask]) ) #Calculate sigma from shifted_mask
+		sigma =   nansum(variance[shifted_mask])**0.5 #Calculate sigma from shifted_mask
 		s2n[i] = flux/sigma #Store S/N of mask in this position
 	if all(isnan(s2n)): #Check if everything in the s2n array is nan, if so this is a bad part of the spectrum
 		return 0 #so return a zero and move along
@@ -731,7 +732,7 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 		shifted_weights =  roll(weights, shift_pixels[i], 1) #Shift weights by some amount of km/s for searching for the optimal shift
 		background = nanmedian(data[shifted_weights == 0.0]) #Calculate typical background per pixel
 		flux = nansum((data-background)*shifted_weights) #Calcualte weighted flux
-		sigma = sqrt( nansum(variance*shifted_weights**2) ) #Calculate weighted sigma
+		sigma = nansum(variance*shifted_weights**2)**0.5  #Calculate weighted sigma
 		#flux = nansum((median_smoothed_data-background)*shifted_weights) #Calcualte weighted flux
 		#sigma = sqrt( nansum(median_smoothed_variance*shifted_weights**2) ) #Calculate weighted sigma
 		s2n[i] = flux / sigma
@@ -784,7 +785,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			on_mask = on_region.get_mask(shape = pv_shape) #Make mask around region file
 		else: #If user specifies to mask with a specific spectral line's S/N
 			line_for_masking = line_labels == line #Find index of line to weight by
-			s2n = pv_data[line_for_masking,:,:][0] / sqrt(pv_variance[line_for_masking,:,:][0])
+			s2n = pv_data[line_for_masking,:,:][0] / pv_variance[line_for_masking,:,:][0]**0.5
 			if any(isfinite(s2n)):
 				on_mask = s2n > s2n_mask #Set on mask to be where line is above some s2n threshold
 				if nansum(on_mask)>1:
@@ -837,7 +838,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				else: #If no background region is specified by the user, use the whole field 
 					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
 				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				line_sigma[i] =  sqrt( nansum(on_variance) ) #Store 1 sigma uncertainity for line
+				line_sigma[i] =  nansum(on_variance)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				#print 'i = ', i
 				#print 'nansum(on_data) = ', nansum(on_data)
@@ -866,7 +867,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
 				weighted_variance  = pv_variance[i,:,:] * shifted_weights**2 #And extract the weighted variance
 				line_flux[i] = nansum(weighted_data)#Calculate flux sum of weighted pixels
-				line_sigma[i] =  sqrt( nansum(weighted_variance) ) #Store 1 sigma uncertainity for line
+				line_sigma[i] =  nansum(weighted_variance)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
 			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
@@ -916,7 +917,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								stop()
 						elif optimal_extraction: #Plot weight contours if user specifies using optimal extraction
 							#try:
-								contour(sqrt(rolled_weights[i,:,:]), linewidths=0.5) #Plot weight contours
+								contour(rolled_weights[i,:,:]**0.5, linewidths=0.5) #Plot weight contours
 								background_mask = rolled_weights[i,:,:] == 0.0 #Find pixels used for background
 								find_background = ones(shape(rolled_weights[i,:,:])) #Set up array to store 1 where backgorund is and 0 where it is not
 								find_background[background_mask] = 0.0 #Set background found to 1 for plotting below
@@ -930,7 +931,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 						pdf.savefig() #Add figure as a page in the pdf
 			#figure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
-			line_sigma = sqrt(line_sigma**2 + (line_flux*systematic_uncertainity)**2) #Combine the statistical uncertainity with the systematic uncertainity
+			line_sigma = (line_sigma**2 + (line_flux*systematic_uncertainity)**2)**0.5 #Combine the statistical uncertainity with the systematic uncertainity
 			line_s2n = line_flux / line_sigma #And then recalculate the S/N based on the new value
 		self.wave = line_wave #Save wavelength of lines
 		self.label = line_labels #Save labels of lines
@@ -1008,7 +1009,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		if to_line == '': #If user does not specify line to take ratio relative to
 			to_line = self.label[0]  #Take ratio relative to the first line in the 
 		ratios = factor * self.flux / self.flux[self.label == to_line] #Take ratios, multiply by some factor if comparing to some other table (ie. compared to H-beta as found in Osterbrock & Ferland 2006)
-		ratios_sigma = sqrt(ratios**2 *((self.sigma/self.flux)**2+(self.sigma[self.label == to_line]/self.flux[self.label == to_line])**2))
+		ratios_sigma = (ratios**2 *((self.sigma/self.flux)**2+(self.sigma[self.label == to_line]/self.flux[self.label == to_line])**2))**0.5
 		fname = save.path + 'line_ratios_relative_to_' + to_line + '.dat' #Set up file path name to save
 		printme = [] #Array that will hold file ouptut
 		for i in xrange(len(self.label)): #Loop thorugh each line
@@ -1109,7 +1110,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 def combine_regions(region_A, region_B, name='combined_region'): #Definition to combine two regions by adding their fluxes and variances together
 	combined_region = copy.deepcopy(region_A) #Start by created the combined region
 	combined_region.flux += region_B.flux #Add fluxes together
-	combined_region.sigma = sqrt(combined_region.sigma**2 + region_B.sigma**2) #Add uncertianity in quadrature
+	combined_region.sigma = (combined_region.sigma**2 + region_B.sigma**2)**0.5 #Add uncertianity in quadrature
 	combined_region.s2n = combined_region.flux / combined_region.sigma #Recalculate new S/N
 	combined_region.path = save.path + name #Store the path to save files in so it can be passed around, eventually to H2 stuff
 	return(combined_region) #Returned combined region
@@ -1152,7 +1153,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 				else: #If no background region is specified by the user, use the whole field 
 					background_level = 0.0 #Or if you don't want to subtract the background, just make the level per pixel = 0
 				line_flux[i] = nansum(data[on_target]) - background_level * size(data[on_target]) #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				line_sigma[i] =  sqrt( nansum(variance[on_target]) ) #Store 1 sigma uncertainity for line
+				line_sigma[i] =   nansum(variance[on_target])**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=10)
@@ -1165,7 +1166,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 					pdf.savefig() #Add figure as a page in the pdf
 		#dfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
-			line_sigma = sqrt(line_sigma**2 + (line_flux*systematic_uncertainity)**2) #Combine the statistical uncertainity with the systematic uncertainity
+			line_sigma = (line_sigma**2 + (line_flux*systematic_uncertainity)**2)**0.5 #Combine the statistical uncertainity with the systematic uncertainity
 			line_s2n = line_flux / line_sigma
 		self.velocity = velocity #Save velocity grid
 		self.wave = line_wave #Save wavelength of lines
@@ -1226,11 +1227,11 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		if make_1d: #If user specifies they want to make a 1D spectrum, we will overwrite the spec1d
 			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nansum(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
-				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
+				sci1d_obj.orders[i].noise = nansum(sci2d_obj.orders[i].noise**2, 0)**0.5 #Collapse 2D noise in 1D
 		elif median_1d: #If user specifies they want to make a 1D spectrum by median collapsing, overwrite the old spec1d, for now we calculate uncertainity by summing variance
 			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nanmedian(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
-				sci1d_obj.orders[i].noise = sqrt(nansum(sci2d_obj.orders[i].noise**2, 0)) #Collapse 2D noise in 1D
+				sci1d_obj.orders[i].noise = nansum(sci2d_obj.orders[i].noise**2, 0)**0.5 #Collapse 2D noise in 1D
 	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
 	if oh != 0: #If user specifies a sky correction image number
 		oh1d = getspec(date, waveno, oh, oh, usestd=False, median_1d=True, twodim=False) #Create 1D and 2D spectra objects for all orders combining both H and K bands (easy eh?)
@@ -1456,7 +1457,7 @@ class spec1d:
 		#wavedata = wavedata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
 		#fluxdata = specdata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
 		#noisedata = sqrt( vardata[0].data.byteswap().newbyteorder() ) #Read out noise from fits file into a simpler variable by taking the square root of the variance
-		noisedata = sqrt(vardata)  #Read out noise from fits file into a simpler variable by taking the square root of the variance
+		noisedata = vardata**0.5  #Read out noise from fits file into a simpler variable by taking the square root of the variance
 		for i in xrange(n_orders): #Loop through to process each order seperately
 			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
@@ -1510,6 +1511,7 @@ class spec1d:
 							trace = 0.
 						flux[i] -= trace
 				order.flux = flux
+
 	def old_subtract_continuum(self, show = False, size = half_block, lines=[], vrange=[-10.0,10.0], use_poly=False): #Subtract continuum using robust running median
 		if show: #If you want to watch the continuum subtraction
 			clf() #Clear interactive plot
@@ -1802,11 +1804,11 @@ class spec2d:
 			# var2d[i,:,:][zero_mask==1.0] = nan 
 			if interpolate_slit or ny!=slit_pixel_length: #If user specifies interpoalting or the slit size does not match the slit size set by the user, interpolate the darn thing
 				data2d = regrid_slit(spec2d[i,:,:], size=slit_pixel_length) 
-				noise2d = regrid_slit(sqrt(var2d[i,:,:]), size=slit_pixel_length)
+				noise2d = regrid_slit(var2d[i,:,:]**0.5, size=slit_pixel_length)
 				print 'Slit pixel length does not match, interpolate to fix it!'
 			else: #Or just read it in, super simple right?
 				data2d = spec2d[i,:,:]
-				noise2d = sqrt(var2d[i,:,:])
+				noise2d = var2d[i,:,:]**0.5
 			# else:
 			# 	data2d = spec2d[i,ny-slit_pixel_length-1:ny-1,:]
 			# 	#data2d = spec2d[0].data[i,ny-slit_pixel_length-1:ny-1,:].byteswap().newbyteorder() #Grab 2D Spectrum of current order
@@ -1972,6 +1974,27 @@ class spec2d:
 							trace[isnan(trace)] = 0. #Zero out nans or infinities or other wierd things
 							flux[:,i] -= trace
 				order.flux = flux
+	def test_fast_subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
+		if size != 0:
+			sizes = [size]
+		if use_combospec: #If user specifies to use combined spectrum
+			orders = [self.combospec] #Use the combined spectrum
+		else: #But is usually better to use individual orders instead
+			orders = self.orders
+		for order in orders: #Apply continuum subtraction to each order seperately
+			flux = copy.deepcopy(order.flux)
+			ny, nx = shape(flux)
+			whole_order_trace = nanmedian(flux, axis=1)
+			whole_order_trace[~isfinite(whole_order_trace)] = 0. #Zero out nans or infinities or other wierd things
+			flux = flux - whole_order_trace[:,newaxis] #Do an intiial removal of the flux
+			for size in sizes:
+				block_of_nans = empty([ny, size])
+				block_of_nans[:] = nan
+				flux = hstack([block_of_nans, flux, block_of_nans])
+				indicies = (arange(size)-(size/2))[:,newaxis] + (arange(nx) + size) #create a giant 2d array for indexes
+				flux -= nanmedian(hstack([block_of_nans, flux, block_of_nans])[newaxis, indicies], axis=1)[size:nx,:]
+				#flux -= median_filter(flux, size=[1,size], mode='reflect')
+			order.flux = flux[size:s]
 	def fill_nans(self, size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size on a column by column basis, done with the combined spectrum combospec
 		ny = self.slit_pixel_length
 		half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')
@@ -1985,7 +2008,7 @@ class spec2d:
 			nanmedian_row_var = nanmedian((self.combospec.noise[y1:y2, :])**2, axis=0)
 			find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
 			self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
-			self.combospec.noise[i, :][find_nans] = sqrt(nanmedian_row_var[find_nans])
+			self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]**0.5
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in xrange(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
@@ -2203,6 +2226,9 @@ class lines:
 		subset.wave = subset.wave[found_lines]
 		subset.label = subset.label[found_lines]
 		return subset #Returns copy of object but with only found lines
+	def recalculate_wavelengths(self, delta_v): #Recalculate the observed wavelengths from the lab wavelengths given a new delta_v
+		self.wave = self.lab_wave * (1.0 + (delta_v/c))
+
 
 
 
@@ -2349,7 +2375,7 @@ class find_lines:
 					centroid_estimate = abs(nansum(flux[in_range]*velocity[in_range]) /summed_flux) #Find precise centroid of line
 					#velocity = c * ( (wave - line_wave) /  line_wave ) - centroid_estimate #Apply a correction for the line centroid
 					#in_range = (velocity >= 1.1*v_range[0]) & (velocity <= 1.1*v_range[1]) & isfinite(flux) #Isolate pixels in velocity space, near the velocity range desired
-					s2n =  nansum(flux[in_range]) / sqrt(nansum(sig[in_range]**2))
+					s2n =  nansum(flux[in_range]) / nansum(sig[in_range]**2)**0.5
 					if s2n > s2n_cut and centroid_estimate < 0.75:
 						interp_flux = interp1d(velocity[in_range], flux[in_range], kind='cubic', bounds_error=False) #Cubic interpolate over line profile
 						profile = interp_flux(interp_velocity_grid) #Get profile over desired velocity range
