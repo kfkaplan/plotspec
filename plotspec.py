@@ -240,7 +240,7 @@ def mask_hydrogen_lines(wave, flux):
 
 
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
-def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, y_power=1.0, y_sharpen=0., wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[], std_shift=0.0):
+def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.0, y_scale=1.0, y_power=1.0, y_sharpen=0., wave_smooth=0.0, delta_v=0.0, quality_cut = False, no_flux = False, savechecks=True, telluric_power=1.0, telluric_spectrum=[], std_shift=0.0, current_frame=''):
 	# #Read in Vega Data
 	std.combine_orders() #Combine orders for standard star specturm for later plotting
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
@@ -294,7 +294,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 	if num_dimensions == 2: #If number of dimensions is 2D
 		slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
 	if savechecks: #If user specifies saving pdf check files 
-		with PdfPages(save.path + 'check_flux_calib.pdf') as pdf: #Load pdf backend for saving multipage pdfs
+		with PdfPages(save.path + 'check_flux_calib_'+current_frame+'.pdf') as pdf: #Load pdf backend for saving multipage pdfs
 			#Plot easy preview check of how well the H I lines are being corrected
 			clf() #Clear page first
 			expected_continuum = copy.deepcopy(std_flattened) #Create object to store the "expected continuum" which will end up being the average of each order's adjacent blaze functions from what the PLP thinks the blaze is for the standard star
@@ -1341,10 +1341,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
 		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks,
-			telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut) #For 1D spectrum
+			telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #For 1D spectrum
 		if twodim: #If user specifies this object has a 2D spectrum
 			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks, 
-				telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut) #Run for 2D spectrum
+				telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #Run for 2D spectrum
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
