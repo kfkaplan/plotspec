@@ -10,6 +10,7 @@ from scipy.stats import linregress
 import copy
 from scipy.linalg import lstsq
 from bottleneck import *
+from astropy.io import ascii
 #from numba import jit #Import numba
 
 
@@ -21,12 +22,15 @@ lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction
 wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
-cloudy_dir = '/Volumes/home/CLOUDY/'
+#cloudy_dir = '/Volumes/home/CLOUDY/'
 #cloudy_dir = '/Volumes/IGRINS_Data/CLOUDY/'
 #cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
-cloudy_h2_data_dir = 'data/' #Directory where H2 data is stored for cloudy
-energy_table = cloudy_h2_data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
-transition_table = cloudy_h2_data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
+cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
+data_dir = 'data/' #Directory where H2 data is stored for cloudy
+# energy_table = data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
+# transition_table = data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
+energy_table = data_dir + 'roueff_2019_energies.dat' #Path to table that stores data on H2 electronic ground state rovibrational energies from Table 2 in Roueff et al. (2019)
+roueff_2019_table = data_dir + 'roueff_2019_table2.tsv' #Path to table storing theoretical molecular data from Table 2 in Roueff et al. (2019)
 k = 0.69503476 #Botlzmann constant k in units of cm^-1 K^-1 (from http://physics.nist.gov/cuu/Constants/index.html)
 h = 6.6260755e-27 #Plank constant in erg s, used for converting energy in wave numbers to cgs
 c = 2.99792458e10 #Speed of light in cm s^-1, used for converting energy in wave numbers to cgs
@@ -47,7 +51,6 @@ symbol_list = ['o','v','8','x','s','*','h','D','^','8','1','o','o','o','o','o','
 
 
 
-
 def get_surface(h2obj, v_range=[2,13], s2n_cut=-1.0): #Find and plot the "fundamental plane"
 	x = h2obj.J.u #Set up x,y,z for all data points
 	y = h2obj.V.u
@@ -59,7 +62,7 @@ def get_surface(h2obj, v_range=[2,13], s2n_cut=-1.0): #Find and plot the "fundam
 	p_init = models.Polynomial2D(degree=1)
 	fit_p = fitting.LevMarLSQFitter()
 	p = fit_p(p_init, x[i], y[i] ,z[i])
-	print p
+	print(p)
 	stop()
 	surf_obj = make_line_list() #Set up H2 line object to store results from fit
 	surf_obj.N = e**p(surf_obj.J.u, surf_obj.V.u) #Store results from fit
@@ -70,7 +73,7 @@ def get_surface(h2obj, v_range=[2,13], s2n_cut=-1.0): #Find and plot the "fundam
 # def find_surface(x, y, z, iterations=10): #Iteratively fit surface
 # 	tot_delta_z = zeros(len(z)) #Store all changes in delta_z, and x and y slopes
 # 	z = copy.deepcopy(z) #Make sure we don't modify the original
-# 	for i in xrange(iterations): #Loop through number of iterations
+# 	for i in range(iterations): #Loop through number of iterations
 # 		#delta_z = median(z) #Find delta z
 # 		#z = z - delta_z #Subtract delta z
 # 		#stop()
@@ -121,7 +124,7 @@ def read_takahashi_uehara_2001_model():
 	Si_B = make_line_list()
 	C_A = make_line_list()
 	C_B = make_line_list()
-	for i in xrange(len(labels)): #Loop through each line in the table
+	for i in range(len(labels)): #Loop through each line in the table
 		match = ice_A.label == labels[i] #Match H2 transition objects to the line and set the flux to the intensity in the table
 		ice_A.F[match] = data_ice_A[i] #Take intensity from table and paint it onto the flux for the respective lines for the respective models
 		ice_B.F[match] = data_ice_B[i]
@@ -135,7 +138,7 @@ def read_takahashi_uehara_2001_model():
 	Si_B.calculate_column_density()
 	C_A.calculate_column_density()
 	C_B.calculate_column_density()
-	for i in xrange(len(labels)): #Loop through each line in the table
+	for i in range(len(labels)): #Loop through each line in the table
 		match = ice_A.label == labels[i] #Match H2 transition objects to the line and set the column density N to what is in the table
 		same_upper_level = (ice_A.V.u == ice_A.V.u[match]) & (ice_A.J.u == ice_A.J.u[match]) #Find all lines from the same upper state
 		ice_A.N[same_upper_level] = ice_A.N[match]
@@ -172,22 +175,28 @@ def two_point_slope_uncertainity(x,y,sig_y):
 
 def make_line_list():
 	#Read in molecular data
-	level_V, level_J = loadtxt(energy_table, usecols=(0,1), unpack=True, dtype='int', skiprows=1) #Read in data for H2 ground state rovibrational energy levels
-	level_E = loadtxt(energy_table, usecols=(2,), unpack=True, dtype='float', skiprows=1)
-	trans_Vu, trans_Ju, trans_Vl, trans_Jl =  loadtxt(transition_table, usecols=(1,2,4,5), unpack=True, dtype='int', skiprows=1) #Read in data for the transitions (ie. spectral lines which get created by the emission of a photon)
-	trans_A =  loadtxt(transition_table, usecols=(6,), unpack=True, dtype='float', skiprows=1) #Read in data for the transitions (ie. spectral lines which get created by the emission of a photon)
-	n_transitions = len(trans_Vu) #Number of transitions
+	# level_V, level_J = loadtxt(energy_table, usecols=(0,1), unpack=True, dtype='int', skiprows=1) #Read in data for H2 ground state rovibrational energy levels
+	# level_E = loadtxt(energy_table, usecols=(2,), unpack=True, dtype='float', skiprows=1)
+	# trans_Vu, trans_Ju, trans_Vl, trans_Jl =  loadtxt(transition_table, usecols=(1,2,4,5), unpack=True, dtype='int', skiprows=1) #Read in data for the transitions (ie. spectral lines which get created by the emission of a photon)
+	# trans_A =  loadtxt(transition_table, usecols=(6,), unpack=True, dtype='float', skiprows=1) #Read in data for the transitions (ie. spectral lines which get created by the emission of a photon)
+	# n_transitions = len(trans_Vu) #Number of transitions
+
 	#Organize molecular data into objects storing J, V, Energy, and A values
-	J_obj = J(trans_Ju, trans_Jl) #Create object storing upper and lower J levels for each transition
-	V_obj = V(trans_Vu, trans_Vl) #Create object storing upper and lower V levels for each transition
-	A = trans_A
-	E_u = zeros(n_transitions)
-	E_l = zeros(n_transitions)
-	for i in xrange(n_transitions):
-		E_u[i] = level_E[ (level_V == trans_Vu[i]) & (level_J == trans_Ju[i]) ]
-		E_l[i] = level_E[ (level_V == trans_Vl[i]) & (level_J == trans_Jl[i]) ]
-	E_obj = E(E_u, E_l) #Create object for storing energies of upper and lower rovibrational levels for each transition
+	# J_obj = J(trans_Ju, trans_Jl) #Create object storing upper and lower J levels for each transition
+	# V_obj = V(trans_Vu, trans_Vl) #Create object storing upper and lower V levels for each transition
+	# A = trans_A
+	# E_u = zeros(n_transitions)
+	# E_l = zeros(n_transitions)
+	# for i in range(n_transitions):
+	# 	E_u[i] = level_E[ (level_V == trans_Vu[i]) & (level_J == trans_Ju[i]) ]
+	# 	E_l[i] = level_E[ (level_V == trans_Vl[i]) & (level_J == trans_Jl[i]) ]
+	# E_obj = E(E_u, E_l) #Create object for storing energies of upper and lower rovibrational levels for each transition
 	#Create and return the transitions object which stores all the information for each transition
+	t = ascii.read(roueff_2019_table, data_start=3)
+	J_obj = J(t['Ju'].data, t['Jl'].data) #Create object storing upper and lower J levels for each transition
+	V_obj = V(t['vu'].data, t['vl'].data) #Create object storing upper and lower V levels for each transition
+	E_obj = E(36118.0695+t['Eu'], 36118.0695+t['Eu']-t['sigma'])  #Create object for storing energies of upper and lower rovibrational levels for each transition
+	A = t['A'] #Grab transition probabilities
 	transitions = h2_transitions(J_obj, V_obj, E_obj, A) #Create main transitions object
 	return transitions #Return transitions object
 
@@ -213,12 +222,12 @@ def calculate_exctinction(transitions, use_Av = [0.0,50.0]):
 			waves = waves[s]
 			labels = transitions.label[i][match_upper_states][s]
 			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
-				print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+				print('For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':')
 				ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
 				Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[1])) #Calculate exctinction in Av
 				sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
-				print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-				print 'Calculated A_V = ', Av
+				print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+				print('Calculated A_V = ', Av)
 				lines_found.append(labels[0]) #Store line labels of lines found
 				lines_found.append(labels[1])
 				if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
@@ -230,47 +239,47 @@ def calculate_exctinction(transitions, use_Av = [0.0,50.0]):
 				lines_found.append(labels[2])
 				#Pair 1
 				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
-					print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
+					print('For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':')
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
 					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[1])) #Calculate exctinction in Av
 					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', Av
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', Av)
 					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
 						Avs.append(Av) #Store Avs
 						sigma_Avs.append(sigma_Av) #Store sigma Avs
 				#Pair 2
 				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
-					print 'For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':'
+					print('For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':')
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[2])
 					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[0])-extinction_curve(waves[2])) #Calculate exctinction in Av
 					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', Av
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', Av)
 					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
 						Avs.append(Av) #Store Avs
 						sigma_Avs.append(sigma_Av) #Store sigma Avs
 				#Pair 3
-					print 'For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':'
+					print('For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':')
 					ratio_of_ratios = transitions.flux_ratio(labels[1], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[1], labels[2])
 					Av =  -2.5*log10(ratio_of_ratios[0][0])/(extinction_curve(waves[1])-extinction_curve(waves[2])) #Calculate exctinction in Av
 					sigma_Av = abs(-2.5 * (ratio_of_ratios[1][0])/(Av*log(10.0))) #Calculate uncertainity in extinction in Av
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', Av
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', Av)
 					if Av > use_Av[0] and Av < use_Av[1]: #If Av is within a reasonable range
 						Avs.append(Av) #Store Avs
 						sigma_Avs.append(sigma_Av) #Store sigma Avs
 				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
 					n_trips_found += 1
-	print 'Number of pairs from same upper state = ', n_doubles_found
-	print 'Number of tripples from same upper state = ', n_trips_found
+	print('Number of pairs from same upper state = ', n_doubles_found)
+	print('Number of tripples from same upper state = ', n_trips_found)
 	Avs = array(Avs) #Convert to numpy arrays to do vector math to figure out weighted mean
 	sigma_Avs = array(sigma_Avs)
 	weights = sigma_Avs**-2
 	summed_weights = nansum(weights)
 	weighted_mean_Av = nansum(Avs * weights) / summed_weights
 	weighted_sigma_Av = sqrt(1.0 / summed_weights)
-	print 'Weighted mean Av = %4.2f' %  weighted_mean_Av + ' +/- %4.2f' % weighted_sigma_Av
+	print('Weighted mean Av = %4.2f' %  weighted_mean_Av + ' +/- %4.2f' % weighted_sigma_Av)
 	return weighted_mean_Av, weighted_sigma_Av
 
 #Simple algorithim to vary alpha (exctinction curve power law) and A_k and do a chi sq
@@ -326,8 +335,8 @@ def find_best_extinction_correction(h_in, s2n_cut=1.0):
 	best_fit = chisqs == nanmin(chisqs) #Find the minimum chisq and best fit alpha and A_K
 	best_fit_A_K = A_Ks[best_fit]
 	best_fit_alpha = alphas[best_fit]
-	print 'Best fit alpha =', best_fit_alpha #Print results so user can see
-	print 'Best fit A_K = ', best_fit_A_K
+	print('Best fit alpha =', best_fit_alpha) #Print results so user can see
+	print('Best fit A_K = ', best_fit_A_K)
 	A_lambda = best_fit_A_K * h_in.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
 	h_in.F *= 10**(0.4*A_lambda) #Apply extinction correction
 	h_in.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
@@ -430,8 +439,8 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 					plot(alpha, pair.A_K - pair.sigma_A_K, '--', color=color_list[V])
 					f = interp1d(alpha, pair.A_K)
 					g = interp1d(alpha, pair.sigma_A_K)
-					print 'V = ', str(V), 'J = ', str(J),' at alpha=2, A_K = ', f(2.0), '+/-', g(2.0)
-					print 'for pair at waves', str(pair.waves[0]), ' & ', str(pair.waves[1]), ' A_delta_lambda=', str(pair.A)
+					print('V = ', str(V), 'J = ', str(J),' at alpha=2, A_K = ', f(2.0), '+/-', g(2.0))
+					print('for pair at waves', str(pair.waves[0]), ' & ', str(pair.waves[1]), ' A_delta_lambda=', str(pair.A))
 			pairs  = []
 		xlabel('Alpha')
 		ylabel('$A_K$')
@@ -443,7 +452,7 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	#for pair in pairs: #Loop through each pair
 	#	plot(pair.waves, [0,10**(0.4*pair.A)])
 	##show()
-	#print 'V=', V
+	#print('V=', V)
 	#pairs = []
 	stop()
 
@@ -457,8 +466,8 @@ def fit_extinction_curve(transitions, a=0.0, A_K=0.0):
 	#suptitle('V = ' + str(V))
 
 	#stop()
-	print 'Number of pairs from same upper state = ', n_doubles_found
-	print 'Number of tripples from same upper state = ', n_trips_found
+	print('Number of pairs from same upper state = ', n_doubles_found)
+	print('Number of tripples from same upper state = ', n_trips_found)
 
 
 
@@ -488,12 +497,12 @@ def test_intrinsic_ratios(transitions):
 			labels = transitions.label[i][match_upper_states][s]
 			#Nsigma = transitions.Nsigma[i][match_upper_states] #Grab uncertainity in column densities
 			if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate differential extinction for this single pair
-				print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
-				#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True)
-				#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
+				print('For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':')
+				#print('     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True))
+				#print('     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1]))
 				ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
-				print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-				print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1]))
+				print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+				print('Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1])))
 				plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
 				lines_found.append(labels[0]) #Store line labels of lines found
 				lines_found.append(labels[1])
@@ -503,36 +512,36 @@ def test_intrinsic_ratios(transitions):
 				lines_found.append(labels[2])
 				#Pair 1
 				if abs(waves[0] - waves[1]) > wave_thresh: #check if pair of lines are far enough apart
-					print 'For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':'
-					#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True)
-					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1])
+					print('For '+labels[0]+'/'+labels[1]+'    '+str(waves[0])+'/'+str(waves[1])+':')
+					#print('     Observed ratio: ', transitions.flux_ratio(labels[0], labels[1], sigma=True))
+					#print('     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[1]))
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[1], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[1])
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1]))
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[1])))
 					plot([waves[0],waves[1]], [ratio_of_ratios[0], 1.])
 
 				#Pair 2
 				if abs(waves[0] - waves[2]) > wave_thresh: #check if pair of lines are far enoug7h apart
-					print 'For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':'
-					#print '     Observed ratio: ', transitions.flux_ratio(labels[0], labels[2], sigma=True)
-					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[2])
+					print('For '+labels[0]+'/'+labels[2]+'    '+str(waves[0])+'/'+str(waves[2])+':')
+					#print('     Observed ratio: ', transitions.flux_ratio(labels[0], labels[2], sigma=True))
+					#print('     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[0], labels[2]))
 					ratio_of_ratios = transitions.flux_ratio(labels[0], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[0], labels[2])
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[2]))
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[0])-extinction_curve(waves[2])))
 					plot([waves[0],waves[2]], [ratio_of_ratios[0], 1.])
 				#Pair 3
-					print 'For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':'
-					#print '     Observed ratio: ', transitions.flux_ratio(labels[1], labels[2], sigma=True)
-					#print '     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[1], labels[2])
+					print('For '+labels[1]+'/'+labels[2]+'    '+str(waves[1])+'/'+str(waves[2])+':')
+					#print('     Observed ratio: ', transitions.flux_ratio(labels[1], labels[2], sigma=True))
+					#print('     Intrinsic ratio:',  transitions.intrinsic_ratio(labels[1], labels[2]))
 					ratio_of_ratios = transitions.flux_ratio(labels[1], labels[2], sigma=True) /  transitions.intrinsic_ratio(labels[1], labels[2])
-					print 'Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0])
-					print 'Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[1])-extinction_curve(waves[2]))
+					print('Observed/intrinsic = %4.2f' % ratio_of_ratios[0][0] + ' +/- %4.2f' % (ratio_of_ratios[1][0]))
+					print('Calculated A_V = ', -2.5*log10(ratio_of_ratios)/(extinction_curve(waves[1])-extinction_curve(waves[2])))
 					plot([waves[1],waves[2]], [ratio_of_ratios[0], 1.])
 				if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
 					n_trips_found += 1
 	#stop()
-	print 'Number of pairs from same upper state = ', n_doubles_found
-	print 'Number of tripples from same upper state = ', n_trips_found
+	print('Number of pairs from same upper state = ', n_doubles_found)
+	print('Number of tripples from same upper state = ', n_trips_found)
 	#return lines_found
 
 ##Store differential extinction between two transitions from the same upper state
@@ -565,18 +574,18 @@ def import_cloudy(model=''): #Import cloudy model from cloudy directory
 	#READ IN LEVEL COLUMN DENSITY FILE
 	# filename = data_dir+model+".h2col" #Name of file to open
 	# v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
-	# for i in xrange(len(v)): #Loop through each rovibrational energy level
+	# for i in range(len(v)): #Loop through each rovibrational energy level
 	# 	found_transitions = (h.V.u == v[i]) & (h.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
 	# 	h.N[found_transitions] = N[i] #Set column density of transitions
 	#READ IN LINE EMISSION FILE AND CONVERT LINE EMISSION TO COLUMN DENSITIES
 	filename = data_dir+model+'.h2.lines'
- 	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
- 	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
- 	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
- 	L=10**log_L #Convert log luminosity to linear units
- 	for i in xrange(len(L)): #Loop through each transition
- 		h.F[(h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i])] = L[i] #Find current transition in h2 transitions object for list of H2 lines cloudy outputs and set flux to be equal to the luminosity of the line outputted by cloudy
- 	h.calculate_column_density()
+	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
+	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
+	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
+	L=10**log_L #Convert log luminosity to linear units
+	for i in range(len(L)): #Loop through each transition
+		h.F[(h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i])] = L[i] #Find current transition in h2 transitions object for list of H2 lines cloudy outputs and set flux to be equal to the luminosity of the line outputted by cloudy
+	h.calculate_column_density()
 	h.normalize() #Normalize to the 5-3 O(3) line
 	return(h)
 
@@ -739,7 +748,7 @@ class h2_transitions:
 		#line_profile =  beta *  exp(-((velocity_grid-centroid)**2/(alpha))) #Calculate normalizeable line profile in velocity space
 		wave = arange(wave_range[0], wave_range[1], pixel_size) #Create wavelength array for 1D synthetic spectrum
 		flux = zeros(len(wave)) #Create flux array for 1D synthetic spectrum
-		for i in xrange(len(self.wave)):
+		for i in range(len(self.wave)):
 			current_wavelength = self.wave[i]
 			if (current_wavelength > wave_range[0]) and (current_wavelength < wave_range[1]):
 				#Interpolate line profile into wavelength space
@@ -754,7 +763,7 @@ class h2_transitions:
 			self.N /= normalize_by_this #Do the normalization
 			self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 		else:
-			print "ERROR: Attempted to normalize by the " + label + " line, but it appears to not exist.  No normalization done.  Try a different line?"
+			print("ERROR: Attempted to normalize by the " + label + " line, but it appears to not exist.  No normalization done.  Try a different line?")
 	def thermalize(self, temperature): #Set all column densities to be thermalized at the specified temperature, normalized to the 1-0 S(1) line
 		exponential = self.g * exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
@@ -763,14 +772,14 @@ class h2_transitions:
 		self.calculate_flux() #Calculate flux of new lines after thermalization
 	def makelabel(self): #Make labels for each transition in spectroscopic notation.
 		labels = []
-		for i in xrange(self.n_lines):
+		for i in range(self.n_lines):
 			labels.append(self.V.label[i] + ' ' + self.J.label[i])
 		return array(labels)
 	def intrinsic_ratio(self, line_label_1, line_label_2): #Return the intrinsic flux ratio of two transitions that arise from the same upper state
 		line_1 = self.label == line_label_1 #Find index to transition 1
 		line_2 = self.label == line_label_2 #Find index to transition 2
 		if (self.V.u[line_1] != self.V.u[line_2]) or (self.J.u[line_1] != self.J.u[line_2]): #Test if both transitions came from the upper state and catch error if not
-			print "ERROR: Both of these transitions do not arise from the same upper state."
+			print("ERROR: Both of these transitions do not arise from the same upper state.")
 			return(0.0) #Return 0 if the transitions do not arise from the same upper state
 		ratio = (self.E.diff()[line_1] * self.A[line_1]) / (self.E.diff()[line_2] * self.A[line_2]) #Calculate intrinsic ratio of the two transitions
 		return(ratio) #return the intrinsic ratio
@@ -791,10 +800,10 @@ class h2_transitions:
 		found_transitions = (self.wave > wave_range[0]) & (self.wave < wave_range[1]) & (self.J.u == Ju) & (self.V.u == Vu)
 		label_subset = self.label[found_transitions]
 		wave_subset = self.wave[found_transitions]
-		for i in xrange(len(label_subset)):
-			print label_subset[i] + '\t' + str(wave_subset[i])
-		#print self.label[found_transitions]#Find all matching transitions in the specified wavelength range with a matching upper J and V state
-		#print self.wave[found_transitions]
+		for i in range(len(label_subset)):
+			print(label_subset[i] + '\t' + str(wave_subset[i]))
+		#print(self.label[found_transitions])#Find all matching transitions in the specified wavelength range with a matching upper J and V state
+		#print(self.wave[found_transitions])
 	def set_flux(self, region): #Set the flux of a single line or multiple lines given the label for it, e.g. h2.set_flux('1-0 S(1)', 456.156)
 		self.path = region.path #Set path to 
 		n = len(region.label)
@@ -805,18 +814,18 @@ class h2_transitions:
 				self.s2n[matched_line] = region.s2n #Set S/N for a single line
 				self.sigma[matched_line] = region.sigma #Set sigma (uncertainity) for a single line
 		else: #if multiple lines
-			for i in xrange(n): #Loop through each line\
+			for i in range(n): #Loop through each line\
 				matched_line = (self.label == region.label[i])
 				if any(matched_line): #If any matches are found...
 					self.F[matched_line] = region.flux[i] #And set flux
 					self.s2n[matched_line] = region.s2n[i] #Set S/N for a single line
 					self.sigma[matched_line] = region.sigma[i] #Set sigma (uncertainity) for a single line
 	def read_model(self, labels, flux): #Read in fluxes from model
-		for i in xrange(len(labels)): #Loop through each line
+		for i in range(len(labels)): #Loop through each line
 			matched_line = (self.label == labels[i]) #Match to H2 line
 			self.F[matched_line] = flux[i] #Set flux to flux from model
 	def read_data(self, labels, flux, sigma):
-		for i in xrange(len(labels)): #Loop through each line
+		for i in range(len(labels)): #Loop through each line
 			matched_line = (self.label == labels[i]) #Match to H2 line
 			self.F[matched_line] = flux[i] #Set flux to flux from data
 			self.sigma[matched_line] = sigma[i] #Set uncertainity to uncertainity from data
@@ -826,44 +835,44 @@ class h2_transitions:
 		clf()
 		plot(self.T[nonzero], log(self.N[nonzero]), 'o')
 		ylabel("Column Density   log$_e$(N/g) [cm$^{-2}$]", fontsize=18)
-   		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
-   		show()
-   	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Output a latex table of column densities for each H2 line
-   		lines = []
-   		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{llrrrrr}")
-   		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
-   		#lines.append("\begin{scriptsize}")
-   		#lines.append(r"\begin{tabular}{cccc}")
-  		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
-   		lines.append(r"\hline\hline")
-   		lines.append(r"\endfirsthead")
-   		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
-   		lines.append(r"\hline\hline")
-   		lines.append(r"\endhead")
-   		lines.append(r"\hline")
-   		lines.append(r"\endfoot")
-   		lines.append(r"\hline")
-   		lines.append(r"\endlastfoot")
-   		if any(self.V.u[self.s2n > s2n_cut]): #Error catching
-   			highest_v = max(self.V.u[self.s2n > s2n_cut]) #Find highest V level
-	   		for v in range(1,highest_v+1): #Loop through each rotation ladder
-	   			i = (self.V.u == v) & (self.s2n > s2n_cut) #Find all lines in the current ladder
-	   			s = argsort(self.J.u[i]) #Sort by upper J level
-	   			labels = self.label[i][s] #Grab line labels
-	   			J =  self.J.u[i][s] #Grab upper J
-	   			N = self.N[i][s] / self.g[i][s] #Grab column density N/g
-	   			E = self.T[i][s]
-	   			A = self.A[i][s]
-	   			wave = self.wave[i][s]
-	   			sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
-	   			for j in xrange(len(labels)):
+		xlabel("Excitation Energy     (E/k)     [K]", fontsize=18)
+		show()
+	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Output a latex table of column densities for each H2 line
+		lines = []
+		#lines.append(r"\begin{table}")  #Set up table header
+		lines.append(r"\begin{longtable}{llrrrrr}")
+		lines.append(r"\caption{\htwo{} rovibrational state column densities}{} \label{tab:coldens} \\")
+		#lines.append("\begin{scriptsize}")
+		#lines.append(r"\begin{tabular}{cccc}")
+		lines.append(r"\hline")
+		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+		lines.append(r"\hline\hline")
+		lines.append(r"\endfirsthead")
+		lines.append(r"\hline")
+		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & \htwo{} line ID & $v_u$ & $J_u$ & $E_u/k$ & $\log_{10}\left(A_{ul}\right)$ & $\ln \left(N_u/g_u\right) - \ln\left(N_{\mbox{\tiny "+normalize_to+r"}}/g_{\mbox{\tiny "+normalize_to+r"}}\right)$ \\")
+		lines.append(r"\hline\hline")
+		lines.append(r"\endhead")
+		lines.append(r"\hline")
+		lines.append(r"\endfoot")
+		lines.append(r"\hline")
+		lines.append(r"\endlastfoot")
+		if any(self.V.u[self.s2n > s2n_cut]): #Error catching
+			highest_v = max(self.V.u[self.s2n > s2n_cut]) #Find highest V level
+			for v in range(1,highest_v+1): #Loop through each rotation ladder
+				i = (self.V.u == v) & (self.s2n > s2n_cut) #Find all lines in the current ladder
+				s = argsort(self.J.u[i]) #Sort by upper J level
+				labels = self.label[i][s] #Grab line labels
+				J =  self.J.u[i][s] #Grab upper J
+				N = self.N[i][s] / self.g[i][s] #Grab column density N/g
+				E = self.T[i][s]
+				A = self.A[i][s]
+				wave = self.wave[i][s]
+				sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
+				for j in range(len(labels)):
 					#lines.append(labels[j] + " & " + str(v) + " & " + str(J[j]) + " & " + "%1.2e" % N[j] + " $\pm$ " + "%1.2e" %  sig_N[j] + r" \\") 
 					lines.append(r"%1.6f" % wave[j] + " &  " + labels[j] + " & " + str(v) + " & " + str(J[j]) + " & %5.0f" % E[j] + " & %1.2f" %  log10(A[j]) +  
 						 " & $" + "%1.2f" % log(N[j]) + r"^{+%1.2f" % (-log(N[j]) + log(N[j]+sig_N[j]))   +r"}_{%1.2f" % (-log(N[j]) + log(N[j]-sig_N[j])) +r"} $ \\") 
-   		#lines.append(r"\hline\hline")
+		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
 		#lines.append(r"\end{table}")
@@ -883,7 +892,7 @@ class h2_transitions:
 				E = self.T[i][s]
 				sig_N =  self.Nsigma[i][s] / self.g[i][s] #Grab uncertainity in N
 				wave = self.wave[i][s] #Grab wavelength of line
-				for j in xrange(len(labels)): #Loop through each rotation ladder
+				for j in range(len(labels)): #Loop through each rotation ladder
 					lines.append(labels[j] + '\t%1.5f' % wave[j] + '\t' + ortho_para[J[j]%2] + '\t' + str(v) + '\t' + str(J[j])+ '\t%1.1f' % E[j] + 
 						 '\t%1.3f'  % log(N[j]) + '\t%1.3f' %  (-log(N[j]) + log(N[j]+sig_N[j])) + '\t%1.3f' % (-log(N[j]) + log(N[j]-sig_N[j])) )
 		savetxt(self.path + '_H2_column_densities.dat', lines, fmt="%s") #Output table
@@ -891,7 +900,7 @@ class h2_transitions:
 		log_N_sigma = nanmax(y_error_bars, 0) #Get largest error in log space
 		if rot_temp_energy_limit > 0.: #If user specifies to cut rotation temp fit, use that....
 			usepts = (T < rot_temp_energy_limit) & isfinite(log_N) 
-			print 'debug time! Log_N[usepts]=', log_N[usepts]
+			print('debug time! Log_N[usepts]=', log_N[usepts])
 			fit, cov = curve_fit(linear_function, T[usepts], log_N[usepts], sigma=log_N_sigma[usepts], absolute_sigma=False) #Do weighted linear regression fit
 		else: #Else fit all points
 			fit, cov = curve_fit(linear_function, T, log_N, sigma=log_N_sigma, absolute_sigma=False) #Do weighted linear regression fit
@@ -910,7 +919,7 @@ class h2_transitions:
 		#plot(T, y-y_sigma, color=color, linestyle='--')
 		rot_temp = -1.0/slope #Calculate the rotation taemperature
 		sigma_rot_temp = rot_temp * (sigma_slope/abs(slope)) #Calculate uncertainity in rotation temp., basically just scale fractional error
-		print 'rot_temp = ', rot_temp,'+/-',sigma_rot_temp
+		print('rot_temp = ', rot_temp,'+/-',sigma_rot_temp)
 		#residuals = e**log_N - e**y #Calculate residuals in fit, but put back in linear space
 		#sigma_residuals = sqrt( (e**(y + y_sigma) - e**y)**2 + (e**(log_N + log_N_sigma)-e**log_N)**2 ) #Calculate uncertainity in residuals from adding uncertainity in fit and data points together in quadarature
 		residuals = e**(log_N-y)
@@ -922,7 +931,7 @@ class h2_transitions:
 		fname = self.path + '_'+name+'.pdf'
 		h2_model = copy.deepcopy(h2_model_input) #Copy h2 model obj so not to modify the original
 		show_these_v  = [] #Set up a blank vibration array to automatically fill 
-		for v in xrange(14): #Loop through and check each set of states of constant v
+		for v in range(14): #Loop through and check each set of states of constant v
 			in_this_v = self.V.u == v
 			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
 				show_these_v.append(v) #store this vibration state for later plotting
@@ -939,7 +948,7 @@ class h2_transitions:
 			ratio.N = (self.N / h2_model.N) #Take a ratio, note we are multiplying by the degeneracy
 			ratio.Nsigma = self.Nsigma  /  h2_model.N
 			chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
-			print 'Compare model for ' + name + ' sum(log10(ratios)**2) = ', chi_sq
+			print('Compare model for ' + name + ' sum(log10(ratios)**2) = ', chi_sq)
 		else: #If user doesn ot specifiy acutally taking a ratio
 			ratio.N = self.N - h2_model.N
 			ratio.Nsigma = self.Nsigma
@@ -974,10 +983,10 @@ class h2_transitions:
 				xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
 				pdf.savefig()
 		return(chi_sq) #Return chisq value to quantify the goodness of fit
-	def v_plot_with_model(self, h2_model_input, x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), s2n_cut=3.0): #Do a vplot with a model overlayed, a simple form of def compare_model for making multipaneled plots and things with your own scripts
+	def v_plot_with_model(self, h2_model_input, x_range=[0.0,55000.0], y_range=array([-6.25,5.5]), s2n_cut=3.0, **args): #Do a vplot with a model overlayed, a simple form of def compare_model for making multipaneled plots and things with your own scripts
 		h2_model = copy.deepcopy(h2_model_input) #Copy h2 model obj so not to modify the original
 		show_these_v  = [] #Set up a blank vibration array to automatically fill 
-		for v in xrange(14): #Loop through and check each set of states of constant v
+		for v in range(14): #Loop through and check each set of states of constant v
 			in_this_v = self.V.u == v
 			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
 				show_these_v.append(v) #store this vibration state for later plotting
@@ -990,11 +999,11 @@ class h2_transitions:
 				h2_model.N[in_this_v] = 0.  #Blank out model if no datapoints are in this rotation ladder
 		#tight_layout(rect=[0.03, 0.00, 1.0, 1.0]) #Try filling in white space
 		h2_model.v_plot(V=show_these_v, orthopara_fill=False, empty_fill=True, show_legend=False, savepdf=False, show_labels=False, line=True,y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True) #Plot model points as lines
-   		self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut)
-   		#ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
-   	def v_plot_ratio_with_model(self, h2_model, x_range=[0.0,55000.0], y_range=array([1e-1,1e1]), s2n_cut=3.0, y_label=r'N$_{obs}$/N$_{model}$'):
-   		show_these_v  = [] #Set up a blank vibration array to automatically fill 
-		for v in xrange(14): #Loop through and check each set of states of constant v
+		self.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True, show_legend=False, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False, s2n_cut=s2n_cut, **args)
+		#ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
+	def v_plot_ratio_with_model(self, h2_model, x_range=[0.0,55000.0], y_range=array([1e-1,1e1]), s2n_cut=3.0, y_label=r'N$_{obs}$/N$_{model}$', **args):
+		show_these_v  = [] #Set up a blank vibration array to automatically fill 
+		for v in range(14): #Loop through and check each set of states of constant v
 			if any(self.s2n[self.V.u == v] >= s2n_cut): #If anything is found to be plotted in the data
 				show_these_v.append(v) #store this vibration state for later plotting
 		self.model_ratio = self.N / h2_model.N #Calulate and store ratio of data/model for later use to make tables or whatever the user wants to script up
@@ -1003,11 +1012,11 @@ class h2_transitions:
 		ratio.Nsigma = self.Nsigma  /  h2_model.N
 		#chi_sq = nansum(log10(ratio.N[ratio.s2n > s2n_cut])**2) #Calculate chisq from ratios
 		plot([0,100000],[1,1], linestyle='--', color='gray')
-		ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=True,
-					show_ratio=True, s2n_cut=s2n_cut, y_range=y_range)
+		ratio.v_plot(V=show_these_v, orthopara_fill=False, full_fill=True,  show_legend=False, savepdf=False, no_zero_x=True, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
+					show_ratio=True, s2n_cut=s2n_cut, y_range=y_range, **args)
 		#ylabel(y_label, fontsize=18)
 		#xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=18)
-   	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
+	def plot_individual_ladders(self, x_range=[0.,0.0], s2n_cut = 0.0): #Plot set of individual ladders in the excitation diagram
 		fname = self.path + '_invidual_ladders_excitation_diagrams.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
 			V = range(0,14)
@@ -1027,7 +1036,7 @@ class h2_transitions:
 			gs = GridSpec(2, 1, height_ratios=[1, 1]) #Set up grid for unequal sized subplots
 			### Left side
 			subplot(gs[0])
-			V = range(1,15)
+			V = range(0,15)
 			self.v_plot(V=V, orthopara_fill=False, full_fill=True, show_legend=True, savepdf=False, y_range=y_range, x_range=x_range, clear=False, show_axis_labels=False, no_legend_label=False,
 					rot_temp=True, rot_temp_residuals=False, s2n_cut=s2n_cut)
 			ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=18)
@@ -1102,12 +1111,12 @@ class h2_transitions:
 	# 			title('V = '+str(i)+' residuals')
 	# 			self.v_plot(V=[i], show_labels=True, rot_temp=False, rot_temp_residuals=True, savepdf=False, s2n_cut=s2n_cut, no_zero_x=True, show_legend=False) #Plot residuals
 	# 			pdf.savefig()
-   	#Make simple plot first showing all the different rotational ladders for a constant V
-   	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=False, orthopara_fill=True, 
-   		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
-   		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
-   		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, multi_temp_fit=False, single_temp_fit=False,
-   		single_color='none', show_ratio=False, symbsize = 9):
+	#Make simple plot first showing all the different rotational ladders for a constant V
+	def v_plot(self, plot_single_temp = False, show_upper_limits = False, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=False, orthopara_fill=True, 
+		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
+		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
+		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, label_V=False, multi_temp_fit=False, single_temp_fit=False,
+		single_color='none', show_ratio=False, symbsize = 9, single_temp_use_sigma=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -1160,6 +1169,10 @@ class h2_transitions:
 				upper_limits = log(self.Nsigma*3.0/self.g)
 			#plus_one_sigma = abs(log_N - data_single_temp - log(self.N - exp(data_single_temp) + self.Nsigma)) #Upper 1 sigma errors in log space
 			#minus_one_sigma = abs(log_N - data_single_temp  - log(self.N - exp(data_single_temp) - self.Nsigma)) #Lower 1 sigma errors in log space
+
+
+
+
 			for i in use_upper_v_states:
 				if single_color != 'none': #If user specifies a specific color, use that single color
 					current_color = single_color
@@ -1174,7 +1187,8 @@ class h2_transitions:
 					#current_symbol = current_symbol + '-' #Draw a line between each symbol
 					current_symbol = '-'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
-				if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
+				#if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
+				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
 					if no_legend_label:
 						use_label = '_nolegend_'
 					else:
@@ -1191,14 +1205,14 @@ class h2_transitions:
 						if show_upper_limits:
 							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2,uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N[ortho])): #Loop through each point to label
+						for j in range(len(log_N[ortho])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
 								text(self.T[ortho][j], log_N[ortho][j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					if label_J: #If user specifies labels for J
-						for j in xrange(len(log_N[ortho])): #Loop through each point to label
+						for j in range(len(log_N[ortho])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
 								text(self.T[ortho][j], log_N[ortho][j], '    '+str(self.J.u[ortho][j]), fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with J upper level
-					#print 'For ortho v=', i
+					#print('For ortho v=', i)
 					if rot_temp and len(log_N[ortho][isfinite(log_N[ortho])]) > 1: #If user specifies fit rotation temperature
 						#stop()
 						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[ortho], log_N[ortho], y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=False, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
@@ -1220,7 +1234,8 @@ class h2_transitions:
 					#current_symbol = current_symbol + ':' #Draw a line between each symbol
 					current_symbol = ':'
 				data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
-				if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
+				#if any(data_found) and not show_ratio: #If any data is found in this vibrational state, add a line on the legend for this state
+				if any(data_found): #If any data is found in this vibrational state, add a line on the legend for this state
 					if no_legend_label: #Check if user wants to use legend labes, if not ignore the label
 						use_label = '_nolegend_'
 					else:
@@ -1238,14 +1253,14 @@ class h2_transitions:
 						if show_upper_limits:
 							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N[para])): #Loop through each point to label
+						for j in range(len(log_N[para])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
 								text(self.T[para][j], log_N[para][j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					if label_J: #If user specifies labels for J
-						for j in xrange(len(log_N[para])): #Loop through each point to label
+						for j in range(len(log_N[para])): #Loop through each point to label
 							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
 								text(self.T[para][j], log_N[para][j], '    '+str(self.J.u[para][j]), fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with J upper level
-					#print 'For para v=', i
+					#print('For para v=', i)
 					if rot_temp and len(log_N[para][isfinite(log_N[para])]) > 1: #If user specifies fit rotation temperature
 						rt, srt, residuals, sigma_residuals = self.fit_rot_temp(self.T[para], log_N[para], y_error_bars, s2n_cut=s2n_cut, color=current_color, dotted_line=True, rot_temp_energy_limit=rot_temp_energy_limit) #Fit rotation temperature
 						self.rot_T[para] = rt #Save rotation temperature for individual lines
@@ -1272,20 +1287,33 @@ class h2_transitions:
 					goodpix = (self.s2n >= s2n_cut) & (self.V.u == V[0])
 					xlim([0.9*min(self.T[goodpix]), 1.1*max(self.T[goodpix])]) #Autoscale with left side of x not fixed at zero
 				elif ignore_x_range:
-					print '' #Do nothing, we are ignoring the xrange here
+					print('') #Do nothing, we are ignoring the xrange here
 				else: #If no points are acutally found just set the limit here.
 					xlim([0,70000.0])
 			else: #Else if user specifies range
 				xlim(x_range) #Use user specified range for x-axis
 			if y_range[1] != 0.0: #If user specifies a y axis limit, use it
 				ylim(y_range) #Use user specified y axis range
+			if label_V: #Loop through and label every vibration level (rotation ladder), if the user sets label_V =  True
+				for i in use_upper_v_states:
+					if single_color != 'none': #If user specifies a specific color, use that single color
+						current_color = single_color
+					elif nocolor: #If user specifies no color,
+						current_color = 'gray'
+					else: #Or else by default use colors from the color list defined at the top of the code
+						current_color = color_list[i]
+					data_found = (self.V.u == i) & (self.s2n > s2n_cut) & (self.N > 0.) #Search for data in this vibrational state
+					if sum(data_found) > 1: #Only add label if any data is found
+						xposition = self.T[data_found][0]
+						#yposition = log_N[data_found][0]
+						text(xposition, y_range[1]*0.9, 'v='+str(i), fontsize=12, verticalalignment='top', horizontalalignment='left', color=current_color, rotation=90)  #Label line with J upper level
 			if show_legend: #If user does not turn off showing the legend
-				legend(loc=1, ncol=2, fontsize=legend_fontsize, numpoints=1, columnspacing=-0.5, title = 'ortho  para  ladder')
+				legend( ncol=2, fontsize=legend_fontsize, numpoints=1, columnspacing=-0.5, title = 'ortho  para  ladder', loc="upper right", bbox_to_anchor=(1,1))
 			if plot_single_temp: #Plot a single temperature line for comparison, if specified
 				x = arange(0,20000, 10)
 				plot(x, single_temp_y_intercept - (x / single_temp), linewidth=2, color='orange')
 				midpoint = size(x)/2
-				text(0.7*x[midpoint], 0.7*(single_temp_y_intercept - (x[midpoint] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
+				text(0.7*x[int(midpoint)], 0.7*(single_temp_y_intercept - (x[int(midpoint)] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
 			if multi_temp_fit: #If user specifies they want to fit a multi temperature gas
 				goodpix = (self.s2n > 5.0) & (self.N > 0.)
 				x = self.T[goodpix]
@@ -1302,27 +1330,31 @@ class h2_transitions:
 				T = [fit[4], fit[5], fit[6]]
 				x = arange(0.0,70000.0,0.1)
 				plot(x, b+log(c[0]*e**(-x/T[0]) + c[1]*e**(-x/T[1])+ c[2]*e**(-x/T[2])),'--', color='Black', linewidth=2)# + c[3]*e**(-x/T[3]) + c[4]*e**(-x/T[4]) + + c[5]*e**(-x/T[5])))
-				print 'Results from temperature fit to Boltzmann diagram data:'
-				print 'b = ', b 
-				print 'c = ', c 
-				print 'T = ', T
+				print('Results from temperature fit to Boltzmann diagram data:')
+				print('b = ', b)
+				print('c = ', c)
+				print('T = ', T)
 			if single_temp_fit: #If user specifies they want to do a single temperature fit (ie. for shocks) 
 				goodpix = (self.s2n > s2n_cut) & (self.N > 0.)
 				x = self.T[goodpix]
 				y = log(self.N[goodpix]/self.g[goodpix])
+				sigma = plus_one_sigma[goodpix]
 				vary_y_intercept = 7.0
 				vary_temp = 3000.0
 				guess = array([10.0, 1000.0])
 				upper_bound = guess + array([vary_y_intercept, vary_temp])
 				lower_bound = guess - array([vary_y_intercept, vary_temp])
-				fit, cov = curve_fit(single_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
+				if single_temp_use_sigma: #If user specifies using the statistical 1 sigma uncertainity in the fit
+					fit, cov = curve_fit(single_temp_func, x, y, guess, sigma, bounds=[lower_bound, upper_bound])
+				else: #Don't use statistical sigma in fit
+					fit, cov = curve_fit(single_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
 				b, T = fit
 				b_err, T_err = sqrt(diag(cov))
 				x = arange(min(x)-1000.0,max(x)+1000.0,0.1)
 				plot(x, b-x/T,'--', color='Black', linewidth=2)
-				print 'Results from temperature fit to Boltzmann diagram data:'
-				print 'b = ', b, ' +/- ', b_err
-				print 'T = ', T, ' +/- ', T_err
+				print('Results from temperature fit to Boltzmann diagram data:')
+				print('b = ', b, ' +/- ', b_err)
+				print('T = ', T, ' +/- ', T_err)
 				#stop()
 				self.model_ratio = self.N /  (self.g*exp(b-self.T/T)) #Calcualte and store ratio of 
 			#show()
@@ -1375,9 +1407,9 @@ class h2_transitions:
 						if show_upper_limits:
 							test = errorbar(self.J.u[ortho_upperlimit], log(self.Nsigma[ortho_upperlimit]*3.0/self.g[ortho_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N)): #Loop through each point to label
+						for j in range(len(log_N)): #Loop through each point to label
 							text(self.J.u[ortho][j], log_N[j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					#print 'For ortho v=', i
+					#print('For ortho v=', i)
 				else: #Else if no datapoints are found...
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label=' ', capthick=3,  elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Do empty plot to fill legend
 				
@@ -1400,9 +1432,9 @@ class h2_transitions:
 						if show_upper_limits:
 							test = errorbar(self.J.u[para_upperlimit], log(self.Nsigma[para_upperlimit]*3.0/self.g[para_upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N)): #Loop through each point to label
+						for j in range(len(log_N)): #Loop through each point to label
 							text(self.J.u[para][j], log_N[j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
-					#print 'For para v=', i					
+					#print('For para v=', i)
 				else: #Else if no datapoints are found...
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, elinewidth=2, markersize=symbsize, fillstyle=parafill)  #Do empty plot to fill legend
 			tick_params(labelsize=14) #Set tick mark label size
@@ -1461,7 +1493,7 @@ class h2_transitions:
 						if show_upper_limits:
 							test = errorbar(self.V.u[upperlimit], log(self.Nsigma[upperlimit]*3.0/self.g[upperlimit]), yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=fill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
-						for j in xrange(len(log_N)): #Loop through each point to label
+						for j in range(len(log_N)): #Loop through each point to label
 							text(self.V.u[found][j], log_N[j], '        '+self.label[found][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 				else: #Else if no datapoints are found...
 					errorbar([nan], [nan], yerr=1.0, fmt=current_symbol,  color=current_color, label='J='+str(i), capthick=3, markersize=symbsize, fillstyle=fill)  #Do empty plot to fill legend
@@ -1555,8 +1587,8 @@ class h2_transitions:
 		best_fit = chisqs == nanmin(chisqs) #Find the minimum chisq and best fit alpha and A_K
 		best_fit_A_K = A_Ks[best_fit]
 		best_fit_alpha = alphas[best_fit]
-		print 'Best fit alpha =', best_fit_alpha #Print results so user can see
-		print 'Best fit A_K = ', best_fit_A_K
+		print('Best fit alpha =', best_fit_alpha) #Print results so user can see
+		print('Best fit A_K = ', best_fit_A_K)
 		A_lambda = best_fit_A_K * self.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
 		self.F *= 10**(0.4*A_lambda) #Apply extinction correction
 		self.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
@@ -1565,25 +1597,37 @@ class h2_transitions:
 	# def find_cascade(v_u, j_u, v_l, j_l): #Find all possible paths between two levels
 	# 	found_transitions = self.tout(v_up, j_up) #Find all transitions out of the upper level
 
-	# 	for i in xrange(len(v_l_trans)):
+	# 	for i in range(len(v_l_trans)):
 	# 		if v_l_trans == v_l and j_l_trans == j_l
 	# 	for found_transition in found_transitions: #Loop through each transition found
 	# 		if self.v.l[found_transition] == v_l and 
 	# 		XXXXX.append(find_cascade
+	def gbar_approx(self): #Estimate collision rate coeffs based on the g-bar approximatino done in Shaw et al. (2005) Section 2.2.1 and Table 2
+		y0 = array([-9.9265, -8.281, -10.0357, -8.6213, -9.2719])#Coeffs from Table 2 of Shaw et al (2005 for H0, He, H2(ortho), H2(para), & H+)
+		a = array([-0.1048, -0.1303, -0.0243, -0.1004, -0.0001])
+		b = array([0.456, 0.4931, 0.67, 0.5291, 1.0391])
+		E_trans = self.E.diff() #Grab energy of transitions (in wavenumber cm^-1)
+		E_trans[E_trans < 100.0] = 100.0 #Set max(sigma, 100) sen in Eq. 1 of Shaw et al. (2005)
+		k_total = zeros(len(E_trans)) #Store total collisional coeffs (cm^3 s^-1)
+		for i in range(5): #Loop through g-bar approx for  H0, He, H2(ortho), H2(para), & H+ and total up the collisional coeffs k for each transition
+			k_total += exp( y0[i] + a[i]*(E_trans**b[i]) ) #Eq 1 in Shaw et al. (2005)
+		#k_total[k_total < 0.] = 0. #Ignore negative coefficients
+		self.k = k_total #Store the estimated collisional reate coeffs for each transition
 
- 
+
+
 class transition_node:
 	def __init__(self, h2_obj, v, J, itercount=0, wave_range=[0.,0.]):
 		#if itercount < 50:
-			print 'itercont = ', itercount, '   v = ', v , ' J = ', J
+			print('itercont = ', itercount, '   v = ', v , ' J = ', J)
 			touts = h2_obj.tout(v, J)
 			n  = size(touts)
 			if n > 0:
 				children = []
 				v_out, J_out, wave = h2_obj.V.l[touts], h2_obj.J.l[touts], h2_obj.wave[touts]
-				for i in xrange(n):
+				for i in range(n):
 					if (wave_range[0] == 0. and wave_range[1] == 0.) or (wave[i] >= wave_range[0] and wave[i] <= wave_range[1]):
-						print 'found transition ', h2_obj.label[touts][i], ' wavelength=', h2_obj.wave[touts][i]
+						print('found transition ', h2_obj.label[touts][i], ' wavelength=', h2_obj.wave[touts][i])
 						children.append(transition_node(h2_obj, v_out[i], J_out[i], itercount + 1, wave_range=wave_range))
 				self.v = v
 				self.J = J
@@ -1592,7 +1636,7 @@ class transition_node:
 				self.last = False
 			else:
 				self.last = True
-				print 'Looks like that is the last of one set of tranistions.'
+				print('Looks like that is the last of one set of tranistions.')
 
 
 class density_surface(): #Fit surface in v and J space, save object to store surface
@@ -1628,7 +1672,7 @@ class J:
 		delta_J = self.diff() #Grab difference between J upper and lower levels
 		n = len(delta_J) #Number of transitions
 		J_labels = []
-		for i in xrange(n):
+		for i in range(n):
 			if delta_J[i] == -2:
 				J_labels.append('O(' + str(self.l[i]) + ')')  #Create label O(J_l) for transitions where delta-J = -2
 			elif delta_J[i] == 0:
@@ -1653,7 +1697,7 @@ class V:
 	def makelabel(self):
 		n = len(self.u) #Number of transitions
 		V_labels = []
-		for i in xrange(n):
+		for i in range(n):
 			V_labels.append( str(self.u[i]) + '-' + str(self.l[i]) ) #Create label for V transitions of V_u-V_l
 		return array(V_labels)
 	def sort(self, sort_object): #Sort both upper and lower levels for a given sorted object fed to this function (e.g. argsort)
@@ -1689,28 +1733,28 @@ def run_cascade(iterations, time, N, trans_A, upper_states, lower_states, pure_r
 	n_states = len(N)
 	n_lines = len(trans_A)
 	time_x_scale_factor = time * scale_factor
-	for k in xrange(iterations): #loop through however many iterations user specifies
-	 	#N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
-	 	#N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
-	 	#N += distribution * scale_factor*time
-	 	if scale_factor > 0.:
-	 		for current_J in xrange(32): #Loop through each J
-		 		#current_rovib_states = (V > 1) & (J==current_J) #Grab index of current pure rotation state
-		 		#current_pure_rot_state = (V == 0) & (J==current_J) #Grab indicies of current rovibration states with the same J as the current pure rotation state
-		 		#current_pure_rot_state = pure_rot_states[current_J]
-		 		#current_rovib_states = rovib_states_per_J[current_J]
-		 		#num_current_rovib_states = len(N[current_rovib_states]) #Count number of rovibrational states we are going to redistribute the popluations from v=0 into
-		 		delta_N = N[pure_rot_states[current_J]] * time_x_scale_factor#How many molecules out of the pure rotation state to redistribute to higher v
-		 		N[rovib_states_per_J[current_J]] += delta_N / len(N[rovib_states_per_J[current_J]]) #num_current_rovib_states  #Redistribute fraction of pure rotation state molecules to higher v
-		 		N[pure_rot_states[current_J]] -= delta_N #Remove molecules in pure rotation state that have now been redistributed
-	 		#N[para] += scale_factor*distribution[para]#*N[ground_J0] #+ 0.5*(1.0-sum(N)))
+	for k in range(iterations): #loop through however many iterations user specifies
+		#N[para] += distribution[para]*(N[ground_J0] + 0.5*(1.0-sum(N)))
+		#N[ortho] += distribution[ortho]*(N[ground_J1] + 0.5*(1.0-sum(N)))
+		#N += distribution * scale_factor*time
+		if scale_factor > 0.:
+			for current_J in range(32): #Loop through each J
+				#current_rovib_states = (V > 1) & (J==current_J) #Grab index of current pure rotation state
+				#current_pure_rot_state = (V == 0) & (J==current_J) #Grab indicies of current rovibration states with the same J as the current pure rotation state
+				#current_pure_rot_state = pure_rot_states[current_J]
+				#current_rovib_states = rovib_states_per_J[current_J]
+				#num_current_rovib_states = len(N[current_rovib_states]) #Count number of rovibrational states we are going to redistribute the popluations from v=0 into
+				delta_N = N[pure_rot_states[current_J]] * time_x_scale_factor#How many molecules out of the pure rotation state to redistribute to higher v
+				N[rovib_states_per_J[current_J]] += delta_N / len(N[rovib_states_per_J[current_J]]) #num_current_rovib_states  #Redistribute fraction of pure rotation state molecules to higher v
+				N[pure_rot_states[current_J]] -= delta_N #Remove molecules in pure rotation state that have now been redistributed
+			#N[para] += scale_factor*distribution[para]#*N[ground_J0] #+ 0.5*(1.0-sum(N)))
 			#N[ortho] += scale_factor*distribution[ortho]#*N[ground_J1] #+ 0.5*(1.0-sum(N)))	
-		 	#N[ground_J0] = 0.
-		 	#N[ground_J1] = 0.
+			#N[ground_J0] = 0.
+			#N[ground_J1] = 0.
 		#N[pure_rot_states] = pure_rot_pops*sum(N[pure_rot_states]) / sum(pure_rot_pops) #Thermalize pure rotation states
 
 		store_delta_N = zeros(n_states)  #Set up array to store all the changes in N 
-		for i in xrange(n_lines):
+		for i in range(n_lines):
 			delta_N = N[upper_states[i]]*transition_amount[i] 
 			store_delta_N[upper_states[i]] -= delta_N
 			store_delta_N[lower_states[i]] += delta_N
@@ -1728,8 +1772,8 @@ class states:
 	def __init__(self, max_J=99):
 		ion() #Set up plotting to be interactive
 		show() #Open a plotting window
-		V, J = loadtxt(energy_table, usecols=(0,1), unpack=True, dtype='int', skiprows=1) #Read in data for H2 ground state rovibrational energy levels
-		E = loadtxt(energy_table, usecols=(2,), unpack=True, dtype='float', skiprows=1)
+		V, J = loadtxt(energy_table, usecols=(0,1), unpack=True, dtype='int')#, skiprows=1) #Read in data for H2 ground state rovibrational energy levels
+		E = loadtxt(energy_table, usecols=(2,), unpack=True, dtype='float')#, skiprows=1)
 		if max_J < 99:  #If user specifies a maximum J, use only states where J <= max_J
 			use_these_states = J <= max_J
 			V = V[use_these_states]
@@ -1744,23 +1788,27 @@ class states:
 		self.g = g_ortho_para * (2*J+1) #Store degeneracy
 		self.tau = zeros(self.n_states) #array for storing radiative lifetime
 		self.Q = zeros(self.n_states)
-		self.A_tot_in = zeros(self.n_states)
+		self.A_tot_in = zeros(self.n_states) #A tots for radiative transitions
 		self.A_tot_out = zeros(self.n_states)
+		self.k_tot_out = zeros(self.n_states) #Estimated k tot (collision rate coeff.) for collisional transitions
 		self.transitions = make_line_list() #Create transitions list 
-		self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
-		self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
-		for i in xrange(self.transitions.n_lines):
-			if self.transitions.J.u[i] <= max_J and self.transitions.J.l[i] <= max_J:
-				self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
-				self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
-		for i in xrange(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
-			transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i])  #Find transitions out of this state
-			transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i]) 
-			self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
-			self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
-			self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
-			self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state]) 
-		self.test_n = self.Q * self.tau
+		# self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
+		# self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
+		# self.transitions.gbar_approx() #Estiamte collisional rate coeffs based on section 2.1.1 of Shaw et al. (2005)
+		# for i in range(self.transitions.n_lines):
+		# 	if self.transitions.J.u[i] <= max_J and self.transitions.J.l[i] <= max_J:
+		# 		self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
+		# 		self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
+		# for i in range(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
+		# 	transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i])  #Find transitions out of this state
+		# 	transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i]) 
+		# 	self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
+		# 	self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
+		# 	self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
+		# 	self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state])
+		# 	self.k_tot_out[i] = sum(self.transitions.k[transitions_out_of_this_state])
+		# self.ncr = self.A_tot_out / self.k_tot_out #Estimate critical densities
+		# self.test_n = self.Q * self.tau
 		self.start_cascade = False #Flag if cascade has started or not
 		#self.convergence = [] #Set up python list that will hold convergence of cascade
 		#UV pumping from Black & Dalgarno (1976) 
@@ -1789,11 +1837,12 @@ class states:
 		#self.BD76_cloud_center_pumping = 
 		pure_rot_states = [] #Save indicies of pure rotation states
 		rovib_states_per_J = [] #Save indicies of each set of rovib states of constant J
-		for current_J in xrange(32): #Loop through each rotation level
+		for current_J in range(32): #Loop through each rotation level
 			pure_rot_states.append((J == current_J) & (V == 0)) #Store indicies for a given J for pure rotation state
 			rovib_states_per_J.append((J == current_J) & (V > 0)) #Store indicies for a given J for all rovib. states where v>0
 		self.pure_rot_states = pure_rot_states
 		self.rovib_states_per_J = rovib_states_per_J
+
 	def thermalize(self, temperature, N_tot=1.0): #Set populations to be thermal at the user supplied temperature
 		exponential = self.g * exp(-self.T/temperature) #Calculate boltzmann distribution for user given temperature, used to populate energy levels
 		boltzmann_distribution = exponential / nansum(exponential) #Create a normalized boltzmann distribution
@@ -1857,22 +1906,22 @@ class states:
 		# transition_amount = trans_A*time
 		# para = J%1==0
 		# ortho = J%1==1
-		# for k in xrange(iterations): #loop through however many iterations user specifies
+		# for k in range(iterations): #loop through however many iterations user specifies
 		# 	#delta_N = N*trans_A[upper_states]*time
 		# 	#store_delta_N -= delta_N
 		# 	#store_delta_N += delta_N
-		# 	#for i in xrange(self.n_states):
+		# 	#for i in range(self.n_states):
 		# 	#	u = upper_states==i
 		# 	#	l = lower_states==i
 		# 	#	store_delta_N[i] -= N[i]*sum(trans_A[u])*time
 		# 	#	store_delta_N[i] += sum(N[l]*trans_A[l])*time
 		# 	store_delta_N = zeros(self.n_states)  #Set up array to store all the changes in N 
 		# 	delta_N = N[upper_states]*transition_amount #Move this much H2 around with this transition
-		# 	for i in xrange(self.n_states):
+		# 	for i in range(self.n_states):
 		# 		store_delta_N[i] = nansum(delta_N[lower_states == i]) - nansum(delta_N[upper_states == i])
 		# 	#store_delta_N[upper_states] -= delta_N
 		# 	#store_delta_N[lower_states] += delta_N
-		# 	#for i in xrange(self.transitions.n_lines): #Loop through each transition
+		# 	#for i in range(self.transitions.n_lines): #Loop through each transition
 		# 	# 	#if trans_A[i] > maxthresh: #Select only certain transitions below a certain A to be important, to optimize code
 		# 	# 		#Ju = self.transitions.J.u[i] #Grab upper and lower J levels for this transition
 		# 	# 		#Jl = self.transitions.J.l[i]
@@ -1884,7 +1933,7 @@ class states:
 		# 	# 		#lower_state = (V == trans_V_l[i]) & (J == trans_J_l[i])#Find loer state of transition
 			 		
 		# 	 		#store_delta_N[upper_states[i], lower_states[i]] += [-delta_N, delta_N] #Try some vectorization
-		# 			#print 'delta_N=', delta_N
+		# 			#print('delta_N=', delta_N)
 		# 	# 		#delta_N = self.N[upper_state]*(1.0 - exp(-self.transitions.A[i]*time) )#Move this much H2 around with this transition
 		# 	# 		store_delta_N[upper_states[i]] -= delta_N[i] #Store change in N taken out of upper state by this transition
 		# 	# 		store_delta_N[lower_states[i]] += delta_N[i] #Store change in N put into lower state by this transition
@@ -1903,18 +1952,18 @@ class states:
 	 # 		#N[V>0] += self.distribution*sum(N[V==0])
 	 # 		#N[V==0] = 0.
 
-	 		
- 		#N[285] = N[285] + N[0] #Test just dumping everything into the final level and let everything cascade out of it.
- 		#N[0]  = 0.0 #Empty out ground state after redistributing all the molecules in the ground
- 		#convergence_measurement = (nansum((N-old_N)))**2
- 		#print 'convergence = ', convergence_measurement
- 		#self.convergence.append(convergence_measurement)#Calculate convergence from one step to the 
- 		self.N = N
- 		if showplot:
- 			self.set_transition_column_densities()
-	 		self.transitions.v_plot(s2n_cut=-1.0, savepdf=False)
- 		#stop()
- 	def set_transition_column_densities(self): #Put column densities into 
-		for i in xrange(self.n_states): #Loop through each level
+			
+		#N[285] = N[285] + N[0] #Test just dumping everything into the final level and let everything cascade out of it.
+		#N[0]  = 0.0 #Empty out ground state after redistributing all the molecules in the ground
+		#convergence_measurement = (nansum((N-old_N)))**2
+		#print('convergence = ', convergence_measurement)
+		#self.convergence.append(convergence_measurement)#Calculate convergence from one step to the 
+		self.N = N
+		if showplot:
+			self.set_transition_column_densities()
+			self.transitions.v_plot(s2n_cut=-1.0, savepdf=False)
+		#stop()
+	def set_transition_column_densities(self): #Put column densities into 
+		for i in range(self.n_states): #Loop through each level
 			upper_states = (self.transitions.J.u == self.J[i]) & (self.transitions.V.u == self.V[i]) #Find all transitions with upper states in a level
 			self.transitions.N[upper_states] = self.N[i] #Set new column densities to the transitions object

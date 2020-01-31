@@ -5,7 +5,6 @@
 
 #Set matplotlib backend to get around freezing plot windows, first try the one TkAgg
 import matplotlib
-#matplotlib.use("qt4Agg")
 
 #Import libraries
 import os #Import OS library for checking and creating directories
@@ -30,20 +29,22 @@ from pylab import size #For some reason size was not working, so I will import i
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
-	print "Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up."
+	print("Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up.")
 import matplotlib.gridspec as grd
 
 #Global variables user should set
-pipeline_path = '/Volumes/home/plp/'
-save_path = '/Volumes/home/results/'
+#pipeline_path = '/Volumes/home/plp/'
+#save_path = '/Volumes/home/results/'
 #pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
 #save_path = '/Volumes/IGRINS_Data/results/'
+#pipeline_path = '/Users/kfkaplan/Desktop/tmp_igrins_data/plp/'
+#save_path = '/Users/kfkaplan/Desktop/tmp_igrins_data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
-#pipeline_path = '/Volumes/IGRINS_data_Backup/plp/'
-#save_path = '/Volumes/IGRINS_data_Backup/results/' #Define path for saving temporary files'
+pipeline_path = '/Volumes/IGRINS_Data_Backup/plp/'
+save_path = '/Volumes/IGRINS_Data_Backup/results/' #Define path for saving temporary files'
 scratch_path = save_path + 'scratch/' #Define a scratch path for saving some temporary files
 if not os.path.exists(scratch_path): #Check if directory exists
-	print 'Directory '+ scratch_path + ' does not exist.  Making new directory.'
+	print('Directory '+ scratch_path + ' does not exist.  Making new directory.')
 	os.mkdir(scratch_path) #If path does not exist, make directory
 #default_wave_pivot = 0.625 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
 default_wave_pivot = 0.85 #Scale where overlapping orders (in wavelength space) get stitched (0.0 is blue side, 1.0 is red side, 0.5 is in the middle)
@@ -74,7 +75,7 @@ def contour_plot(x, y, z, nx=100, ny=100, levels=[3.,4.,5.,6.,7.,8.,9.,10.,15.,2
 	#zmin, zmax = min(z), max(z)
 	#Set up grid of interpolated points
 	xi, yi = linspace(xmin, xmax, nx), linspace(ymin, ymax, ny)
-	xi, yi = meshgrid(xi, yi)
+	xi, yi = meshgrid(xi, yi, copy=False)
 	#Interpolate
 	#rbf = Rbf(x, y, z, function='linear')
 	#zi = rbf(xi, yi)
@@ -98,7 +99,7 @@ class save_class: #Class stores information on what path to save files to
 	def set_path(self): #Update path to directory to save results in
 		self.path = save_path + self.object + '/'
 		if not os.path.exists(self.path): #Check if directory exists
-			print 'Directory '+ self.path+ ' does not exist.  Making new directory.'
+			print('Directory '+ self.path+ ' does not exist.  Making new directory.')
 			os.mkdir(self.path) #If path does not exist, make directory
 		
 save = save_class() #Create object user can change the name to
@@ -315,7 +316,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 			figtext(0.05,0.95,r"Check AOV H I line fits (y-scale: "+str(y_scale)+", y-power: "+str(y_power)+", y_sharpen: "+str(y_sharpen)+" wave_smooth: "+str(wave_smooth)+", std_shift: "+str(std_shift)+")", fontsize=12,rotation=0) #Shared title
 			waves = std.combospec.wave #Wavelength array to interpolate to
 			normalized_HI_lines = a0v_synth_cont(waves)/a0v_synth_spec(waves) #Get normalized lines to the wavelength array
-			for i in xrange(n_HI_lines): #Loop through each H I line we want to preview
+			for i in range(n_HI_lines): #Loop through each H I line we want to preview
 				subplot(2,2,i+1) #Set up current line's subplot
 				#tight_layout(pad=5) #Use tightlayout so things don't overlap
 				fig = gcf()#Adjust aspect ratio
@@ -345,7 +346,7 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 			legend(loc="upper right")
 			tight_layout()
 			pdf.savefig()  #Save showing synthetic A0V spectrum that the data will be divided by to do relative flux calibration & telluric correction on second page of PDF
-	for i in xrange(std.n_orders): #Loop through and plot each order for the observed A0V, along with the corrected H I absorption to see how well the synthetic A0V spectrum fits
+	for i in range(std.n_orders): #Loop through and plot each order for the observed A0V, along with the corrected H I absorption to see how well the synthetic A0V spectrum fits
 		if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
 			std.orders[i].flux[std_flattened.orders[i].flux <= .1] = nan #Mask out bad pixels
 		waves = std.orders[i].wave #Std wavelengths
@@ -390,7 +391,7 @@ class position_velocity:
 			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
 			save_shift_wave = zeros(n_lines) #Create arrays to store shifted wavelengths and velocities
 			save_shift_v = zeros(n_lines)
-			for i in xrange(len(shift_labels)): #Go through each line and shift it's wavlength
+			for i in range(len(shift_labels)): #Go through each line and shift it's wavlength
 				find_line = show_lines.label == shift_labels[i]
 				if any(find_line): #Only run if a line is found
 					pre_shfited_wavelength = copy.deepcopy(show_lines.wave[find_line]) #Save pre shifted wavelength
@@ -398,7 +399,7 @@ class position_velocity:
 					save_shift_v[find_line] = shift_v[i] #Save velocity shift
 					save_shift_wave[find_line] = show_lines.wave[find_line] - pre_shfited_wavelength #save wavelength shift
 				#print shift_labels[i]
-		for i in xrange(n_lines): #Label the lines
+		for i in range(n_lines): #Label the lines
 			pv_velocity = c * ( (wave_pixels / show_lines.wave[i]) - 1.0 ) #Calculate velocity offset for each pixel from c*delta_wave / wave
 			pixel_cut = abs(pv_velocity) <= velocity_range #Find only pixels in the velocity range, this is for conserving flux
 			ungridded_wavelengths = wave_pixels[pixel_cut]
@@ -411,9 +412,9 @@ class position_velocity:
 			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
 			interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			gridded_wavelengths = interp_wave(interp_velocity) #Get wavelengths as they appear on the velocity grid
-			dl_dv = gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1] / set_velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
+			dl_dv = (gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1]) / set_velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
 			dl_dv = hstack([dl_dv, dl_dv[len(dl_dv)-1]]) #Add an extra thing at the end of the delta-lambda/delta-velocity array so that it has an equal number of elements as everything else here
- 			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
+			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
 			gridded_variance_2d = interp_variance_2d(interp_velocity) * dl_dv**2 #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
 				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv
@@ -459,9 +460,9 @@ class position_velocity:
 		ds9.set('grid numerics type exterior') #Put numbers external to PV diagram
 		ds9.set('grid numerics color black') #Make numbers black for easier reading
 		if printlines: #If user sets printlines = True, list lines and their index in the command line
-			print 'Lines are....'
-			for i in xrange(self.n_lines): #Loop through each line
-				print i+1, self.label[i] #Print index and label for line in terminal
+			print('Lines are....')
+			for i in range(self.n_lines): #Loop through each line
+				print(i+1, self.label[i]) #Print index and label for line in terminal
 		if line != '': #If user specifies line name, find index of that line and dispaly it
 			self.goline(line)
 		if wave != 0.0: #If user specifies wavelength, find nearest wavelength for that line being specified and display it
@@ -478,16 +479,16 @@ class position_velocity:
 				i = 1 + where(self.label == line)[0][0] #Find instance of line matching the provided name
 				self.display_line(i)
 			else: #If index not provided
-				print 'ERROR: No line label specified'
+				print('ERROR: No line label specified')
 		except IndexError: #If line is unable to be found (ie. not in current band) catch and print the following error...
-			print 'ERROR: Unable to find the specified line in this spectrum.  Please try again.'
+			print('ERROR: Unable to find the specified line in this spectrum.  Please try again.')
 	def gowave(self, wave): #Function causes DS9 to display a specified line (PV diagram must be already loaded up using self.view()
 		if wave != 0.0: #If user specifies line name, find index of that line
 			nearest_wave = abs(self.lab_wave - wave).min() #Grab nearest wavelength
 			i = 1 + where(abs(self.lab_wave-wave) == nearest_wave)[0][0] #Grab index for line with nearest wavelength
 			self.display_line(i)
 		else:
-			print 'ERROR: No line wavelength specified'
+			print('ERROR: No line wavelength specified')
 	def display_line(self, i): #Moves DS9 to display correct 2D PV diagram of line, and also displays 1D line
 		label_string = self.label[i-1]
 		wave_string = "%12.5f" % self.lab_wave[i-1]
@@ -496,7 +497,7 @@ class position_velocity:
 		self.plot_1d_velocity(i-1, title = title)
 	def make_1D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 1D lines in a single PDF file
 		with PdfPages(save.path + pdf_file_name) as pdf: #Make a multipage pd
-			for i in xrange(self.n_lines):
+			for i in range(self.n_lines):
 				label_string = self.label[i]
 				wave_string = "%12.5f" % self.lab_wave[i]
 				title = label_string + '   ' + wave_string + ' $\mu$m'
@@ -505,7 +506,7 @@ class position_velocity:
 	def make_2D_postage_stamps(self, pdf_file_name): #Make a PDF showing all 2D lines in a single PDF file
 		#figure(figsize=(2,1), frameon=False)
 		with PdfPages(save.path + pdf_file_name) as pdf: #Make a multipage pd
-			for i in xrange(self.n_lines):
+			for i in range(self.n_lines):
 				label_string = self.label[i]
 				wave_string = "%12.5f" % self.lab_wave[i]
 				title = label_string + '   ' + wave_string + ' $\mu$m'
@@ -563,7 +564,7 @@ class position_velocity:
 		elif type == 'var' and dim == 1: #If user specifies 1D variance
 			pv_file = fits.PrimaryHDU(self.var1d)
 		else: #Report error
-			print 'ERROR: Type '+ type + ' or dimension' + str(dim) + 'for saving fits file not correctly specified.'
+			print('ERROR: Type '+ type + ' or dimension' + str(dim) + 'for saving fits file not correctly specified.')
 		#Add WCS for linear interpolated velocity
 		pv_file.header['CTYPE1'] = 'km/s' #Set unit to "Optical velocity" (I know it's really NIR but whatever...)
 		pv_file.header['CRPIX1'] = (self.velocity_range / self.velocity_res) + 1 #Set zero point to where v=0 km/s (middle of stamp)
@@ -606,7 +607,7 @@ class position_velocity:
 		elif type == 'var' and dim == 1: #If user specifies 1D variance
 			self.var1d = input_data
 		else: #Report error
-			print 'ERROR: Type '+ type + ' or dimension' + str(dim) + 'for reading fits file not correctly specified.'
+			print('ERROR: Type '+ type + ' or dimension' + str(dim) + 'for reading fits file not correctly specified.')
 	def getline(self, line): #Grabs PV diagram for a single line given a line label
 		i =  where(self.label == line)[0][0] #Search for line by label
 		return self.pv[i] #Return line found
@@ -638,17 +639,17 @@ class position_velocity:
 		#ioff()#  Turn off interactive plotting mode
 		self.view() #Load up DS9 and the 1D view of the PV diagrams
 		save_text = [] #Set up array for ascii text to save new pared down line list
-		for i in xrange(self.n_lines): #Loop through to read in each line
+		for i in range(self.n_lines): #Loop through to read in each line
 			clf() #Clear figure for looking at 1D
 			self.goline(self.label[i]) #View this line
 			#show() 
 			pause(0.001)
-			print 'Line = ', self.label[i] #Print info about line in command line
-			print 'Wave = ', self.lab_wave[i]
+			print('Line = ', self.label[i]) #Print info about line in command line
+			print('Wave = ', self.lab_wave[i])
 			answer = raw_input('Include in list? (y/n) ') #Ask user if they want to include this line in the line list
 			if answer == 'Y' or answer == 'y':
 				save_text.append('%1.10f' % self.lab_wave[i] + '\t' + self.label[i])
-		print 'DONE WITH LIST!'
+		print('DONE WITH LIST!')
 		output_filename = 'line_lists/' + raw_input('Please give a filename for the line list: ')
 		savetxt(output_filename, save_text, fmt="%s") #Output line list
 		#ion() #Turn interactive plotting mode back on 0
@@ -656,7 +657,7 @@ class position_velocity:
 		pv = copy.deepcopy(self.pv)
 		if s2n_cut > 0.:
 			g = Gaussian2DKernel(stddev=s2n_smooth)
-			for i in xrange(len(pv)):
+			for i in range(len(pv)):
 				low_s2n_mask = convolve(pv[i], g) / self.var2d[i]**0.5 < s2n_cut
 				pv[i][low_s2n_mask] = nan
 		if prange[0] == 0 and prange[1] == 0: #If user does not specify prange explicitely 
@@ -680,12 +681,12 @@ class position_velocity:
 		position_moment_mask = zeros(shape(self.pv)) #Set up array that will hold masks
 		combined_moment_mask = zeros(shape(self.pv)) #Set up array that will hold masks
 		position = arange(self.slit_pixel_length)
-		for i in xrange(len(self.pv)): #Loop through each line
-			for j in xrange(len(self.velocity)): #Loop through each position along the slit
+		for i in range(len(self.pv)): #Loop through each line
+			for j in range(len(self.velocity)): #Loop through each position along the slit
 				three_sigma_range = (position < self.position_mean[i,j]+sigma*self.position_variance[i,j]**0.5) & (position > self.position_mean[i,j]-sigma*self.position_variance[i,j]**0.5) #Find +/- 3 sigma from mean
 				position_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
 				combined_moment_mask[i,three_sigma_range,j] = 1.0 #Apply mask
-			for k in xrange(len(position)): #Loop through each velocity resoultion element
+			for k in range(len(position)): #Loop through each velocity resoultion element
 				three_sigma_range = (self.velocity < self.velocity_mean[i,k]+sigma*self.velocity_variance[i,k]**0.5) &  (self.velocity > self.velocity_mean[i,k]-sigma*self.velocity_variance[i,k]**0.5)#Find +/- 3 sigma from mean
 				velocity_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
 				combined_moment_mask[i,k,three_sigma_range] = 1.0 #Apply mask
@@ -694,7 +695,7 @@ class position_velocity:
 		self.combined_moment_mask = combined_moment_mask
 	# def get_moment(self, moment, line): #Specify desired moment and line and return the result
 	# 	if not hasattr(self, 'moments'): #Check if moments have been calculated yet
-	# 		print 'Moments not yet calculated.  Claculating now.'
+	# 		print('Moments not yet calculated.  Claculating now.')
 	# 		self.calculate_moments() #Calculate moments, if not done already
 	# 	i =  where(self.label == line)[0][0] #Search for line by label
 	# 	return self.moments[moment, i, :] #Return moment 
@@ -709,7 +710,7 @@ def fit_mask(mask_contours, data, variance, pixel_range=[-10,10]): #Find optimal
 	smoothed_data = median_filter(data, size=[5,5])
 	shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
 	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
-	for i in xrange(len(shift_pixels)):
+	for i in range(len(shift_pixels)):
 		shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
 		shifted_mask = shifted_mask_contours == 1.0 #Create new maskf from shifted mask countours
 		flux = nansum(smoothed_data[shifted_mask]) - nanmedian(smoothed_data[~shifted_mask])*size(smoothed_data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
@@ -728,7 +729,7 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
 	#max_weight = nanmax(weights) #Find maximum of weights 
 	#background_weight = max_weight * background_threshold_scale #Set weight below which will be used as background, typicall 1000x less than the peak signal
-	for i in xrange(len(shift_pixels)): #Loop through each position in velocity space to test the optimal extraction
+	for i in range(len(shift_pixels)): #Loop through each position in velocity space to test the optimal extraction
 		shifted_weights =  roll(weights, shift_pixels[i], 1) #Shift weights by some amount of km/s for searching for the optimal shift
 		background = nanmedian(data[shifted_weights == 0.0]) #Calculate typical background per pixel
 		flux = nansum((data-background)*shifted_weights) #Calcualte weighted flux
@@ -764,7 +765,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		if background == '': #If no background region file is specified by the user, ask if user wants to specify region, and if so ask for path
 			answer = raw_input('Do you want to designate a specific region to measure the median background (y) or just use the whole postage stamp (n)? ')
 			if answer == 'y':
-				print 'Draw DS9 region around part(s) of line you want to measure the median background for and save it as a .reg file in the scratch directory.'
+				print('Draw DS9 region around part(s) of line you want to measure the median background for and save it as a .reg file in the scratch directory.')
 				background == raw_input('What is the name of the region file? ')
 				use_background_region = True
 			else:
@@ -811,7 +812,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			rolled_masks = zeros(shape(pv_data)) #Create array for storing rolled masks for later plotting, to save time computing the roll
 		elif optimal_extraction: #If user wants an optimal extraction 
 			rolled_weights =  zeros(shape(pv_data)) #Create array for storing rolled weights for later plotting, to save time computing the roll
-		for i in xrange(n_lines): #Loop through each line
+		for i in range(n_lines): #Loop through each line
 			if s2n_mask > 0.0: #If user specifies a s2n mask
 				#shift_mask_pixels = self.fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
 				shift_mask_pixels = fit_mask(mask_contours, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range) #Try to find the best shift in velocity space to maximize S/N
@@ -840,9 +841,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
 				line_sigma[i] =  nansum(on_variance)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
-				#print 'i = ', i
-				#print 'nansum(on_data) = ', nansum(on_data)
-				#print 'background = ', background
+				#print('i = ', i)
+				#print('nansum(on_data) = ', nansum(on_data))
+				#print('background = ', background)
 			elif optimal_extraction: #Okay if the user specifies to use optimal extraction now that we know how the weights have been shifted to maximize S/N
 				### Horne 1986 optimal extraction method, tests show it doesn't work so well as the weighting scheme below so it's commented out, left here if I wever want to revivie it
 				# p = sqrt(shifted_weights)
@@ -872,7 +873,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
 			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
 				figure(figsize=[11.0,8.5])
-				for i in xrange(n_lines): #Loop through each line
+				for i in range(n_lines): #Loop through each line
 					#subplot(n_subfigs, n_subfigs, i+1)
 					
 					clf() #Clear plot field
@@ -900,7 +901,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 								try:
 									ax.add_patch(p)
 								except:
-									print 'Glitch plotting pyregion.  Weird.'
+									print('Glitch plotting pyregion.  Weird.')
 							for t in on_text_list:
 								ax.add_artist(t)
 							if use_background_region:
@@ -955,7 +956,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	smoothed_data = median_filter(data, size=[5,5])
 	# 	shift_pixels = arange(pixel_range[0], pixel_range[1]) #Set up array for rolling mask
 	# 	s2n = zeros(shape(shift_pixels)) #Set up array to store S/N of each shift
-	# 	for i in xrange(len(shift_pixels)):
+	# 	for i in range(len(shift_pixels)):
 	# 		shifted_mask_contours = roll(mask_contours, shift_pixels[i], 1) #Shift the mask contours by a certain number of pixels
 	# 		shifted_mask = shifted_mask_contours == 1.0 #Create new mask from shifted mask countours
 	# 		flux = nansum(smoothed_data[shifted_mask]) - nanmedian(smoothed_data[~shifted_mask])*size(smoothed_data[shifted_mask]) #Calculate flux from shifted mask, do simple background subtraction
@@ -966,30 +967,30 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	else: #Otherwise we got something decent so...
 	# 		return shift_pixels[s2n == nanmax(s2n)][0] #Return pixel shift that maximizes the s2n
 	def make_latex_table(self, output_filename, s2n_cut = 3.0, normalize_to='5-3 O(3)'): #Make latex table of line fluxes
-   		lines = []
-   		#lines.append(r"\begin{table}")  #Set up table header
-   		lines.append(r"\begin{longtable}{rrlrr}")
-   		lines.append(r"\caption{Line Fluxes}{} \label{tab:fluxes} \\")
-   		#lines.append("\begin{scriptsize}")
-   		#lines.append(r"\begin{tabular}{cccc}")
-   		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & $\Delta\lambda$  & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
-   		lines.append(r"\hline\hline")
-   		lines.append(r"\endfirsthead")
-   		lines.append(r"\hline")
-   		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & $\Delta\lambda$  & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
-   		lines.append(r"\hline\hline")
-   		lines.append(r"\endhead")
-   		lines.append(r"\hline")
-   		lines.append(r"\endfoot")
-   		lines.append(r"\hline")
-   		lines.append(r"\endlastfoot")
-   		flux_norm_to = self.flux[self.label == normalize_to]
-   		for i in xrange(len(self.label)):
-   			if self.s2n[i] > s2n_cut:
+		lines = []
+		#lines.append(r"\begin{table}")  #Set up table header
+		lines.append(r"\begin{longtable}{rrlrr}")
+		lines.append(r"\caption{Line Fluxes}{} \label{tab:fluxes} \\")
+		#lines.append("\begin{scriptsize}")
+		#lines.append(r"\begin{tabular}{cccc}")
+		lines.append(r"\hline")
+		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & $\Delta\lambda$  & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
+		lines.append(r"\hline\hline")
+		lines.append(r"\endfirsthead")
+		lines.append(r"\hline")
+		lines.append(r"$\lambda_{\mbox{\tiny vacuum}}$ & $\Delta\lambda$  & Line ID & $\log_{10} \left(F_i / F_{\mbox{\tiny "+normalize_to+r"}}\right)$ & S/N \\")
+		lines.append(r"\hline\hline")
+		lines.append(r"\endhead")
+		lines.append(r"\hline")
+		lines.append(r"\endfoot")
+		lines.append(r"\hline")
+		lines.append(r"\endlastfoot")
+		flux_norm_to = self.flux[self.label == normalize_to]
+		for i in range(len(self.label)):
+			if self.s2n[i] > s2n_cut:
 				lines.append(r"%1.6f" % self.wave[i] + " & " + "%1.6f" % self.shift_wave[i]  + " & " + self.label[i] + " & $" + "%1.2f" % log10(self.flux[i]/flux_norm_to) + 
 					r"^{+%1.2f" % (-log10(self.flux[i]/flux_norm_to) + log10(self.flux[i]/flux_norm_to+self.sigma[i]/flux_norm_to)) 
-				   +r"}_{%1.2f" % (-log10(self.flux[i]/flux_norm_to) + log10(self.flux[i]/flux_norm_to-self.sigma[i]/flux_norm_to)) +r"} $ & %1.1f" % self.s2n[i]  + r" \\") 
+					+r"}_{%1.2f" % (-log10(self.flux[i]/flux_norm_to) + log10(self.flux[i]/flux_norm_to-self.sigma[i]/flux_norm_to)) +r"} $ & %1.1f" % self.s2n[i]  + r" \\") 
    		#lines.append(r"\hline\hline")
 		#lines.append(r"\end{tabular}")
 		lines.append(r"\end{longtable}")
@@ -1001,7 +1002,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
 		lines = []
 		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
-		for i in xrange(len(self.label)):
+		for i in range(len(self.label)):
 			lines.append(self.label[i] + "\t%1.5f" % self.wave[i] + "\t%1.3e" % self.flux[i] + "\t%1.3e" % self.sigma[i])
 		savetxt(save.path + output_filename, lines, fmt="%s") #Output Table
 	#~~~~~~~save line ratios~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1012,7 +1013,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		ratios_sigma = (ratios**2 *((self.sigma/self.flux)**2+(self.sigma[self.label == to_line]/self.flux[self.label == to_line])**2))**0.5
 		fname = save.path + 'line_ratios_relative_to_' + to_line + '.dat' #Set up file path name to save
 		printme = [] #Array that will hold file ouptut
-		for i in xrange(len(self.label)): #Loop thorugh each line
+		for i in range(len(self.label)): #Loop thorugh each line
 			printme.append(self.label[i] + '/'+ to_line + '\t%1.5f' % ratios[i] + '\t%1.5f' % ratios_sigma[i]) #Save ratio to an array that will be outputted as the .dat file
 		savetxt(fname, printme, fmt="%s") #Output Table, and we're done
 	# def calculate_HI_extinction(self, s2n_cut=3.0, max_n=16): #Calculate extinction by comparing measured H I line fluxes to theory predicted by pyneb 
@@ -1025,7 +1026,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	found_predicted_fluxes = []
 	# 	found_labels = []
 	# 	#loop through each possible H I line in our predicted flux list and see if they exist in this region object, if they do, append the founds lists
-	# 	for i in xrange(len(state_is[]	# 		label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
+	# 	for i in range(len(state_is[]	# 		label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
 	# 		find_line = where(self.label == label)[0] #Check if line exists in this region object
 	# 		if len(find_line)==1 and state_i[i] < max_n and state_j[i] < max_n: #If it is found
 	# 			find_line = find_line[0] #Get found line index out of array and into a simple integer
@@ -1047,7 +1048,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 	# 	br14_brgamma_chisq = zeros(n_AVS)
 	# 	br14 = found_labels == 'H I 4-14'
 	# 	brgamma = found_labels == 'H I 4-7'
-	# 	for i in xrange(n_AVs):
+	# 	for i in range(n_AVs):
 	# 		reddened_predicted_flux = found_predicted_fluxes * 10**(-0.4*extinction_curve(found_wavelengths)*AVs[i])  #Apply artificial def  to predicted line fluxes
 	# 		ratio = found_observed_fluxes / reddened_predicted_flux #Calculate ratio to observed to artificially reddened predicted line fluxes
 	# 		median_ratio = nanmedian(ratio) #Find the median ratio
@@ -1072,20 +1073,20 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		observed_br14_brgamma_ratio = (self.flux[self.label=='H I 4-14'] / self.flux[self.label=='H I 4-7'])[0]
 		br14_extinction_curve = extinction_curve(1.5884880)
 		brgamma_extinction_curve = extinction_curve(2.166120)
-		for i in xrange(n_AVs):
+		for i in range(n_AVs):
 			reddened_predicted_br_14_flux =  predicted_br14_flux * 10**(-0.4*br14_extinction_curve*AVs[i])  #Apply artificial reddening to predicted line fluxes
 			reddened_predcited_br_gamma_flux = predicted_brgamma_flux * 10**(-0.4*brgamma_extinction_curve*AVs[i])  #Apply artificial reddening to predicted line fluxes
 			reddened_predicted_ratio = reddened_predicted_br_14_flux / reddened_predcited_br_gamma_flux #Calculate ratio to observed to artificially reddened predicted line fluxes
 			chisq[i] = (observed_br14_brgamma_ratio-reddened_predicted_ratio)**2 #calculate the chisq'
 		best_AV = AVs[chisq==nanmin(chisq)] 
-		print 'AV = ', best_AV #print the AV that matches the minimum chisq
+		print('AV = ', best_AV) #print the AV that matches the minimum chisq
 		if plot_result:
 			found_wavelengths = []
 			found_observed_fluxes = []
 			found_predicted_fluxes = []
 			found_labels = []
 			#loop through each possible H I line in our predicted flux list and see if they exist in this region object, if they do, append the founds lists
-			for i in xrange(len(state_i)):
+			for i in range(len(state_i)):
 				label = 'H I '+str(state_j[i])+'-'+str(state_i[i]) #construct a string to match the line label strings in the H I line list
 				find_line = where(self.label == label)[0] #Check if line exists in this region object
 				if len(find_line)==1 : #If it is found
@@ -1144,7 +1145,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 			line_flux = zeros(n_lines) #Set up array to store line fluxes
 			line_s2n = zeros(n_lines) #Set up array to store line S/N, set = 0 if no variance is found
 			line_sigma = zeros(n_lines) #Set up array to store 1 sigma uncertainity
-			for i in xrange(n_lines): #Loop through each line
+			for i in range(n_lines): #Loop through each line
 				clf() #Clear plot field
 				data = flux[i]
 				variance = var[i]
@@ -1162,7 +1163,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 						plot([vrange[0], vrange[0]], [-1e50,1e50], linestyle='--', color = 'blue')  #Plot blueshifted velocity limits
 						plot([vrange[1], vrange[1]], [-1e50,1e50], linestyle='--', color = 'blue')  #Plot redshifted velocity limits
 						plot([flat_nanmin(velocity), flat_nanmax(velocity)], [background_level/1e3, background_level/1e3], linestyle='--', color = 'blue') #Plot background level
-					#print "background_level = ",background_level
+					#print("background_level = ",background_level)
 					pdf.savefig() #Add figure as a page in the pdf
 		#dfigure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
@@ -1181,7 +1182,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 	def save_table(self, output_filename, s2n_cut = 3.0): #Output simple text table of wavelength, line label, flux
 		lines = []
 		lines.append('#Label\tWave [um]\tFlux\t1 sigma uncertainity')
-		for i in xrange(len(self.label)):
+		for i in range(len(self.label)):
 			lines.append(self.label[i] + "\t%1.5f" % self.wave[i] + "\t%1.3e" % self.flux[i] + "\t%1.3e" % self.sigma[i])
 		savetxt(save.path + output_filename, lines, fmt="%s") #Output Table
 
@@ -1219,17 +1220,17 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		H_sci2d_obj =  makespec(date, 'H', waveno, frameno, twodim=True, mask_cosmics=mask_cosmics, interpolate_slit=interpolate_slit) #Read in H-band
 		K_sci2d_obj =  makespec(date, 'K', waveno, frameno, twodim=True, mask_cosmics=mask_cosmics, interpolate_slit=interpolate_slit) #Read in K-band
 		#if H_sci2d_obj.slit_pixel_length != K_sci2d_obj.slit_pixel_length:
-		#print 'H slit length: ', H_sci2d_obj.slit_pixel_length
-		#print 'K slit length: ', K_sci2d_obj.slit_pixel_length
+		#print('H slit length: ', H_sci2d_obj.slit_pixel_length)
+		#print('K slit length: ', K_sci2d_obj.slit_pixel_length)
 		sci2d_obj = H_sci2d_obj #Create master object
 		sci2d_obj.orders = K_sci2d_obj.orders + H_sci2d_obj.orders #Combine orders
 		sci2d_obj.n_orders = K_sci2d_obj.n_orders + H_sci2d_obj.n_orders #Find new total number of orders
 		if make_1d: #If user specifies they want to make a 1D spectrum, we will overwrite the spec1d
-			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
+			for i in range(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nansum(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
 				sci1d_obj.orders[i].noise = nansum(sci2d_obj.orders[i].noise**2, 0)**0.5 #Collapse 2D noise in 1D
 		elif median_1d: #If user specifies they want to make a 1D spectrum by median collapsing, overwrite the old spec1d, for now we calculate uncertainity by summing variance
-			for i in xrange(sci2d_obj.n_orders): #Loop through each order to....
+			for i in range(sci2d_obj.n_orders): #Loop through each order to....
 				sci1d_obj.orders[i].flux = nanmedian(sci2d_obj.orders[i].flux, 0) #Collapse 2D spectrum into 1D
 				sci1d_obj.orders[i].noise = nansum(sci2d_obj.orders[i].noise**2, 0)**0.5 #Collapse 2D noise in 1D
 	#Read in sky difference frame to correct for OH lines, with user interacting to set the scaling
@@ -1252,7 +1253,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			OH_lines = lines(OH_line_list, delta_v=0.0) #Load OH line list
 			parsed_OH_lines = OH_lines.parse( flat_nanmin(wave), flat_nanmax(wave))
 			width=0.00006
-			for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
+			for i in range(len(parsed_OH_lines.wave)): #Loop through each line
 				oh_mask[abs(wave-parsed_OH_lines.wave[i]) < width] += 1 #Create mask of OH lines...
 			g = Gaussian1DKernel(stddev=200) #Prepare to smooth the science data to zero out any continuum
 			flux = flux - convolve(flux, g) #Subtract a crude fit to the continuum so that most of the OH residuals start around 0 flux
@@ -1262,8 +1263,8 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			in_k_band = (sci_obj.combospec.wave > 1.85) & (oh_mask == 2) #Find only pixels in the K band and near a bright OH residual
 			h_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for h band
 			k_store_chi_sq = zeros([len(scales), len(flex)]) #Array for storing chi-sq for k band
-			for i in xrange(len(scales)): #Loop through each possible scaling of the OH residuals
-				for k in xrange(len(flex)): #Look through each possible flexure value of the OH residuals
+			for i in range(len(scales)): #Loop through each possible scaling of the OH residuals
+				for k in range(len(flex)): #Look through each possible flexure value of the OH residuals
 					tweaked_oh =  flexure(oh_flux*scales[i], flex[k]) #Apply the flexure and scaling to the OH sky difference residuals
 					diff = (flux - tweaked_oh) #Subtract the tweaked OH sky difference residuals from the residuals in the science flux
 					diff[~isfinite(diff)] = nan #Turn all values for diff that are infinite into nans so the nansum doesn't sum to infinity
@@ -1275,16 +1276,16 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 			best_k_band_indicies = where(k_store_chi_sq == flat_nanmin(k_store_chi_sq)) #Find best fit by findinging the minimum chisq in the K band
 			oh_scale = [scales[best_h_band_indicies[0][0]], scales[best_k_band_indicies[0][0]]] #Save OH scaling best fit
 			oh_flexure = [flex[best_h_band_indicies[1][0]], flex[best_k_band_indicies[1][0]]] #Save OH flexure best fit
-			print 'No oh_scale specified by user, using automated chi-sq rediction routine.'
-			print 'OH residual scaling found to be: ', oh_scale
-			print 'OH residual flexure found to be: ', oh_flexure
+			print('No oh_scale specified by user, using automated chi-sq rediction routine.')
+			print('OH residual scaling found to be: ', oh_scale)
+			print('OH residual flexure found to be: ', oh_flexure)
 		if oh_flexure != 0.: #If user specifies a flexure correction
 			if size(oh_flexure) == 1: #If the correction is only one number, correct all orders
-				for i in xrange(sci1d_obj.n_orders): #Loop through each order
+				for i in range(sci1d_obj.n_orders): #Loop through each order
 					oh1d.orders[i].flux = flexure(oh1d.orders[i].flux, oh_flexure) #Apply flexure correction to 1D array
 					#oh2d.orders[i].flux = flexure(oh1d.orders[i].flux, oh_flexure) #Apply flexure correction to 2D array
 			else: #Else if correction has two numbers, the first number is the H band and hte second number is the K band
-				for i in xrange(sci1d_obj.n_orders):#Loop through each order
+				for i in range(sci1d_obj.n_orders):#Loop through each order
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
 						flexure_index = 0
 					else:
@@ -1296,7 +1297,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		if savechecks: #If user specifies to save checks as a pdf
 			with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
 				clf()
-				for i in xrange(sci1d_obj.n_orders): #Save whole spectrum at once
+				for i in range(sci1d_obj.n_orders): #Save whole spectrum at once
 					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
 					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data')
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
@@ -1310,7 +1311,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 				title('Check whole spectrum')
 				tight_layout()
 				pdf.savefig()
-				for i in xrange(sci1d_obj.n_orders): #Then save each order for closer inspection
+				for i in range(sci1d_obj.n_orders): #Then save each order for closer inspection
 					clf()
 					#()
 					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
@@ -1325,7 +1326,7 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 					title('Check individual orders')
 					tight_layout()
 					pdf.savefig()
-		for i in xrange(sci1d_obj.n_orders):
+		for i in range(sci1d_obj.n_orders):
 			if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
 				use_oh_scale = oh_scale[0]
 			else:
@@ -1404,7 +1405,7 @@ class fits_file:
 		self.n_orders = len(fits_container[0].data[:,0]) #cound number of orders in fits file
 		fits_container.close() #Close fits file data
 		#self.data = fits.open(self.path) #Open fits file and put data into memory
-		#print self.path
+		#print(self.path)
 	def filepath(self): #Given input variables, determine the path to the target fits file
 		prefix =  'SDC' + self.band + '_' + self.date + '_' + self.frameno #Set beginning (prefix) of filename
 		if self.std: #If file is for a standard star and you want the flattened spectrum
@@ -1458,7 +1459,7 @@ class spec1d:
 		#fluxdata = specdata[0].data.byteswap().newbyteorder() #Read out wavelength and flux data from fits files into simpler variables
 		#noisedata = sqrt( vardata[0].data.byteswap().newbyteorder() ) #Read out noise from fits file into a simpler variable by taking the square root of the variance
 		noisedata = vardata**0.5  #Read out noise from fits file into a simpler variable by taking the square root of the variance
-		for i in xrange(n_orders): #Loop through to process each order seperately
+		for i in range(n_orders): #Loop through to process each order seperately
 			orders.append( spectrum(wavedata[i,:], specdata[i,:], noise=noisedata[i,:])  ) #Append order to order list
 		self.n_orders = n_orders
 		self.orders = orders
@@ -1479,7 +1480,7 @@ class spec1d:
 	# 				x_right[x_right > nx] = nx - 1 #Set pixels beyond right edge of order to be nonexistant
 	# 				#x_size = x_right - x_left #Calculate number of pixels in the x (wavelength) direction			
 	# 				unmodified_flux = copy.deepcopy(flux)	
-	# 				for i in xrange(nx):
+	# 				for i in range(nx):
 	# 						trace = nanmedian(unmodified_flux[x_left[i]:x_right[i]])
 	# 						if trace == nan: trace = 0.
 	# 						flux[i] -= trace
@@ -1500,7 +1501,7 @@ class spec1d:
 					if size%2 == 0: size = size + 1 #Get rid of even sizes and replace with an odd version
 					half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
 					unmodified_flux = copy.deepcopy(flux)	
-					for i in xrange(nx):
+					for i in range(nx):
 						x_left, x_right = i + half_sizes
 						if x_left < 0:
 							x_left = 0
@@ -1525,7 +1526,7 @@ class spec1d:
 				p_init = models.Polynomial1D(degree=4)
 				fit_p = fitting.SimplexLSQFitter()
 				nx = len(old_order.flux)
-			 	x = arange(nx)
+				x = arange(nx)
 				p =  fit_p(p_init, x, old_order.flux)
 				subtracted_flux = order.flux - p(x)
 			else:
@@ -1559,8 +1560,8 @@ class spec1d:
 		blank = zeros([order_length*self.n_orders])#Create blanks to store new giant spectrum
 		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
 		combospec.wave = copy.deepcopy(blank)
- 		combospec.noise = copy.deepcopy(blank)
- 		#combospec.s2n = copy.deepcopy(blank)
+		combospec.noise = copy.deepcopy(blank)
+		#combospec.s2n = copy.deepcopy(blank)
 		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
 			if i == self.n_orders-1: #If first order, simply throw it in
 				xl = 0
@@ -1599,7 +1600,7 @@ class spec1d:
 	#Plot spectrum with lines from line list overplotted
 	def plotlines(self, linelist, threshold=0.0, model='', rows=5, ymax=0.0, fontsize=9.5, relative=False):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
-			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			print('No spectrum of combined orders found.  Createing combined spectrum.')
 			self.combine_orders() #Combine spectrum before plotting, if not done already
 		#clf() #Clear plot
 		min_wave  = flat_nanmin(self.combospec.wave) #Find maximum wavelength
@@ -1619,7 +1620,7 @@ class spec1d:
 			normalize_model = max_flux / model_max_flux #normalize tallest line in model to the tallest line in IGRINS data
 			model_flux = normalize_model * model_flux #Apply normalization to model spectrum to match IGRINS spectrum
 		#fig = figure(figsize=(15,11)) #Set proportions
-		for j in xrange(rows): #Loop breaks spectrum figure into multiple rows
+		for j in range(rows): #Loop breaks spectrum figure into multiple rows
 			wave_range = [min_wave + total_wave_coverage*(float(j)/float(rows)), #Calculate wavelength range for a single row
 						min_wave + total_wave_coverage*(float(j+1)/float(rows))]
 			subplot(rows,1,j+1) #split into multiple plots
@@ -1629,7 +1630,7 @@ class spec1d:
 			flux_to_interp = append(insert(self.combospec.flux, 0, 0.0), 0.0)
 			sci_flux_interp = interp1d(wave_to_interp, flux_to_interp) #Get interpolation object of science spec.
 			sub_linelist.flux = sci_flux_interp(sub_linelist.wave) #Get height of spectrum for each individual line
-			for i in xrange(len(sub_linelist.wave)):#Output label for each emission lin
+			for i in range(len(sub_linelist.wave)):#Output label for each emission lin
 				other_lines = abs(sub_linelist.wave - sub_linelist.wave[i]) < 0.00001 #Window (in microns) to check for regions of higher flux nearby so only the brightest lines (in this given range) are labeled.
 				#if sub_linelist.flux[i] > max_flux*threshold and nanmax(sub_linelist.flux[other_lines], axis=0) == sub_linelist.flux[i]: #if line is the highest of all surrounding lines within some window
 					#if sub_linelist.label[i] == '{OH}': #If OH lines appear in line list.....
@@ -1657,12 +1658,12 @@ class spec1d:
 	def mask_OH(self, width=0.00006, input_linelist=OH_line_list): #Mask OH lines, use only after processing and combinging spectrum to make a cleaner 1D spectrum
 		OH_lines = lines(input_linelist, delta_v=0.0) #Load OH line list
 		parsed_OH_lines = OH_lines.parse( flat_nanmin(self.combospec.wave), flat_nanmax(self.combospec.wave))
-		for i in xrange(len(parsed_OH_lines.wave)): #Loop through each line
+		for i in range(len(parsed_OH_lines.wave)): #Loop through each line
 			mask_these_pixels = abs(self.combospec.wave-parsed_OH_lines.wave[i]) < width #Create mask of OH lines...
 			self.combospec.flux[mask_these_pixels] = nan #Turn all pixels with OH lines into numpy nans so the OH lines don't get plotted
 	def savespec(self, name='1d_spectrum.dat'): #Save 1D spectrum, set 'name' to be the filename yo uwant
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
-			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			print('No spectrum of combined orders found.  Createing combined spectrum.')
 			self.combine_orders() #Combine spectrum before plotting, if not done already
 		savetxt(save.path + name, transpose([self.combospec.wave, self.combospec.flux, self.combospec.noise])) #Save 1D spectrum as simple .dat file with wavelength, flux, and noise in seperate columns
 	def fitgauss(self,line_list, v_range=[-30.0,30.0]): #Fit 1D gaussians to the 1D spectra and plot results
@@ -1680,7 +1681,7 @@ class spec1d:
 				n_lines = len(parsed_line_list.label) #Number of spectral lines
 				fwhm = zeros(n_lines) #Create array to store FWHM of gaussian fits for each line
 				x_pixels = zeros(n_lines) #Create array to store which x pixel the line is centered on
-				for i in xrange(n_lines): #Loop through each individual line
+				for i in range(n_lines): #Loop through each individual line
 					line_wave = parsed_line_list.wave[i]
 					x_pixels[i] = where(order.wave >= line_wave)[0][0]
 					all_velocity = c * ( (order.wave - line_wave) /  line_wave )
@@ -1711,9 +1712,9 @@ class spec1d:
 							plot(interp_velocity_grid, interpolate_line_profile(interp_velocity_grid), color='blue', label='Interpolation')
 							legend()
 							pdf.savefig()
-							#print 'mean = ', g_mean
-							#print 'stddev = ', g_stddev
-							#print 'FWHM = ', g_fwhm
+							#print('mean = ', g_mean)
+							#print('stddev = ', g_stddev)
+							#print('FWHM = ', g_fwhm)
 				goodfit = fwhm > 0.
 				clf()
 				plot(parsed_line_list.wave[goodfit], fwhm[goodfit], 'o')
@@ -1745,10 +1746,10 @@ class spec1d:
 			xlabel('x pixel')
 			ylabel('FWHM')
 			pdf.savefig()
-			print 'Number of lines with decent Gaussian fits = ', len(all_fwhm)
-			print 'All Lines Median FWHM = ', median(all_fwhm)
-			print 'All Lines Mean FWHM = ', mean(all_fwhm)
-			print 'All Lines std-dev FWHM = ', std(all_fwhm)
+			print('Number of lines with decent Gaussian fits = ', len(all_fwhm))
+			print('All Lines Median FWHM = ', median(all_fwhm))
+			print('All Lines Mean FWHM = ', mean(all_fwhm))
+			print('All Lines std-dev FWHM = ', std(all_fwhm))
 	def c_deredden(self, c_value): #Deredden spectrum with a value of "c" measured for H-beta from the literature, while assuming the extinction law of Rieke & Lebofsky (1985)		
 		#A_lambda = array([1.531, 1.324, 1.000, 0.748, 0.482,  0.282,  0.175,  0.112,  0.058]) #(A_lambda / A_V) extinction curve from Rieke & Lebofsky (1985) Table 3
 		#l = array([ 0.365, 0.445, 0.551, 0.658, 0.806,  1.22 ,  1.63 , 2.19 , 3.45 ]) #Wavelengths for extinction curve from Rieke & Lebofsky (1985)
@@ -1787,7 +1788,7 @@ class spec2d:
 		slit_pixel_length = slit_length  #Height of slit in pixels for this target and band
 		orders = [] #Set up empty list for storing each orders
 		#wavedata = wavedata[0].data.byteswap().newbyteorder()
-		for i in xrange(n_orders):
+		for i in range(n_orders):
 			#wave1d = spec2d[1].data[i,:].byteswap().newbyteorder() #Grab wavelength calibration for current order
 			wave1d = wavedata[i,:] #Grab wavelength calibration for current order
 			#wave2d = tile(wave1d, [slit_pixel_length,1]) #Create a 2D array storing the wavelength solution, to be appended below the data
@@ -1805,7 +1806,7 @@ class spec2d:
 			if interpolate_slit or ny!=slit_pixel_length: #If user specifies interpoalting or the slit size does not match the slit size set by the user, interpolate the darn thing
 				data2d = regrid_slit(spec2d[i,:,:], size=slit_pixel_length) 
 				noise2d = regrid_slit(var2d[i,:,:]**0.5, size=slit_pixel_length)
-				print 'Slit pixel length does not match, interpolate to fix it!'
+				print('Slit pixel length does not match, interpolate to fix it!')
 			else: #Or just read it in, super simple right?
 				data2d = spec2d[i,:,:]
 				noise2d = var2d[i,:,:]**0.5
@@ -1841,7 +1842,7 @@ class spec2d:
 			orders = self.orders
 		for order in orders: #Apply continuum subtraction to each order seperately
 			#if sum(isnan(order.flux)) / size(order.flux) < 0.8: #Only try to subtract the continuum if at least 80% of the pixels exist
-				#print 'order = ', i, 'number of dimensions = ', num_dimensions
+				#print('order = ', i, 'number of dimensions = ', num_dimensions)
 				old_order =  copy.deepcopy(order)
 				flux_length = shape(old_order.flux)[1] #Get length (in wavelength space) of flux array
 				old_order.flux[nansum(isnan(old_order.flux), axis=1).astype('float')/float(flux_length) > 0.5, :] = 0. #If an entire row is majority nan, zero it out
@@ -1882,7 +1883,7 @@ class spec2d:
 					#set_each_column_to_be_unity = flatten_order_by_trace / nanmedian(flatten_order_by_trace, axis=0)
 				#old_order.flux[isnan(old_order.flux)] = 0. #Zero out nans when normalizing the flux to get rid of some annoying errors
 				if linear_fit: ##WARNING EXPERIMENTAL, If user wants to use a line fit of the trace along the x direction
-					for i in xrange(N): #Loop through each segment
+					for i in range(N): #Loop through each segment
 						median_set[i,:] = nanmedian(old_order.flux[:,set_size*i: set_size*(i+1)-1], axis=1) #Find trace of this single segment
 					normalized_median_set = nanmax(median_set, axis=1) #Normalize the median sets by the trace and then collapse result along slit
 					finite_pixels = isfinite(normalized_median_set)
@@ -1894,7 +1895,7 @@ class spec2d:
 					# ny = len(old_order.flux[:,0])
 				 # 	x = arange(nx)
 				 # 	result_2d = zeros([ny,nx])
-				 # 	for row in xrange(ny):
+				 # 	for row in range(ny):
 				 # 		if any(isfinite(old_order.flux[row,:])):
 					# 		#stop()
 					# 		p =  fit_p(p_init, x, old_order.flux[row,:])
@@ -1946,7 +1947,7 @@ class spec2d:
 					#plot(cont_sub.combospec.wave, cont_sub.combospec.flux, label='Continuum Subtraction')
 					#legend()
 				#else:
-					#print 'ERROR: Unable to determine number of dimensions of data, something went wrong'
+					#print('ERROR: Unable to determine number of dimensions of data, something went wrong')
 	def subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
 		if size != 0:
 			sizes = [size]
@@ -1964,7 +1965,7 @@ class spec2d:
 					if size%2 == 0: size = size + 1 #Get rid of even sizes
 					half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')		
 					unmodified_flux = copy.deepcopy(flux)	
-					for i in xrange(nx):
+					for i in range(nx):
 							x_left, x_right = i + half_sizes
 							if x_left < 0:
 							    x_left = 0
@@ -1995,22 +1996,40 @@ class spec2d:
 				flux -= nanmedian(hstack([block_of_nans, flux, block_of_nans])[newaxis, indicies], axis=1)[size:nx,:]
 				#flux -= median_filter(flux, size=[1,size], mode='reflect')
 			order.flux = flux[size:s]
-	def fill_nans(self, size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size on a column by column basis, done with the combined spectrum combospec
-		ny = self.slit_pixel_length
+	def fill_nans(self, size=5): #Fill nans with median of nearby pixels in same column
+		#ny = self.slit_pixel_length
+		ny, nx = shape(self.combospec.flux)
 		half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')
-		#half_size = (size-1)/2 #Get +/- number of pixels for the size
-		for i in xrange(ny):
-			#y1, y2 = i - half_size, i+half_size #Get top and bottom indicies
-			y1, y2 = i + half_sizes #Get top and bottom indicies
-			if y1 < 0: y1=0
-			if y2 > ny: y2 = ny
-			nanmedian_row_flux = nanmedian(self.combospec.flux[y1:y2, :], axis=0) #Grab nanmedian flux and variance values for current row
-			nanmedian_row_var = nanmedian((self.combospec.noise[y1:y2, :])**2, axis=0)
-			find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
-			self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
-			self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]**0.5
+		#is_nan = ~isfinite(self.combospec.flux)
+		for i in range(nx):
+			current_column_flux = copy.deepcopy(self.combospec.flux[:,i])
+			current_column_noise = copy.deepcopy(self.combospec.noise[:,i])
+			#use_pixels = ~is_nan[y1:y2,j]
+			for j in range(ny):
+				if ~isfinite(current_column_flux[j]):
+					y1, y2 = j + half_sizes #Get top and bottom indicies
+					if y1 < 0: y1=0
+					if y2 > ny: y2 = ny
+					current_column_flux[j] = nanmedian(self.combospec.flux[y1:y2,i])
+					current_column_noise[j] = nanmedian(self.combospec.noise[y1:y2,i])
+			self.combospec.flux[:,i] = current_column_flux
+			self.combospec.noise[:,i] = current_column_noise
+	# def fill_nans(self, size=5): #Fill nans and empty edge pixels with a nanmedian filter of a given size on a column by column basis, done with the combined spectrum combospec
+	# 	ny = self.slit_pixel_length
+	# 	half_sizes = array([-(size-1)/2, ((size-1)/2)+1], dtype='int')
+	# 	#half_size = (size-1)/2 #Get +/- number of pixels for the size
+	# 	for i in range(ny):
+	# 		#y1, y2 = i - half_size, i+half_size #Get top and bottom indicies
+	# 		y1, y2 = i + half_sizes #Get top and bottom indicies
+	# 		if y1 < 0: y1=0
+	# 		if y2 > ny: y2 = ny
+	# 		nanmedian_row_flux = nanmedian(self.combospec.flux[y1:y2, :], axis=0) #Grab nanmedian flux and variance values for current row
+	# 		nanmedian_row_var = nanmedian((self.combospec.noise[y1:y2, :])**2, axis=0)
+	# 		find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
+	# 		self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
+	# 		self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]**0.5
 	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
-		for i in xrange(self.n_orders-1): #Loop through each order
+		for i in range(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
 				edges =concatenate([arange(use_edges), self.slit_pixel_length - arange(use_edges) -1])
 				median_along_slit = nanmedian(self.orders[i].flux[edges,:], axis=0) #Collapse median along slit
@@ -2023,8 +2042,8 @@ class spec2d:
 		blank = zeros([order_height, order_length*self.n_orders])#Create blanks to store new giant spectrum
 		combospec.flux = copy.deepcopy(blank) #apply blanks to everything
 		combospec.wave = zeros(order_length*self.n_orders)
- 		combospec.noise = copy.deepcopy(blank)
- 		#combospec.s2n = copy.deepcopy(blank)
+		combospec.noise = copy.deepcopy(blank)
+		#combospec.s2n = copy.deepcopy(blank)
 		for i in range(self.n_orders-1, -1, -1): #Loop through each order to stitch one and the following one together
 			if i == self.n_orders-1: #If first order, simply throw it in
 				xl = 0
@@ -2053,7 +2072,7 @@ class spec2d:
 		self.combospec = combospec #save the orders all stitched together
 	def plot(self, spec_lines, pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
-			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			print('No spectrum of combined orders found.  Createing combined spectrum.')
 			self.combine_orders() #If combined spectrum does not exist, combine the orders
 		wave_fits = fits.PrimaryHDU(tile(self.combospec.wave, [self.slit_pixel_length,1]))    #Create fits file containers
 		if s2n: #If you want to view the s2n
@@ -2096,7 +2115,7 @@ class spec2d:
 			interval = (max_wave - min_wave) / num_wave_labels #Interval between each wavelength label
 			wave_labels = arange(min_wave, max_wave, interval) #Store wavleengths of where wave labels are going to go
 			x_labels = x_interp(wave_labels) #Grab x positions of the wavelength labels
-			for j in xrange(num_wave_labels): #Label the wavelengths #Loop through each wavlength label\
+			for j in range(num_wave_labels): #Label the wavelengths #Loop through each wavlength label\
 				x_label = str(x_labels[j])
 				regions.append('image; line(' + x_label +', '+ top_y + ', ' + x_label + ', ' + bottom_y + ' ) # color=blue ')
 				regions.append('image; text('+ x_label +', '+label_y+') # color=blue textangle=90 text={'+str("%12.5f" % wave_labels[j])+'}')
@@ -2106,7 +2125,7 @@ class spec2d:
 			num_OH_lines = len(show_lines.wave)
 			x_labels = x_interp(show_lines.wave)
 			#labels_x of lines to display
-			for j in xrange(num_OH_lines): #Label the lines
+			for j in range(num_OH_lines): #Label the lines
 				x_label = str(x_labels[j])
 				regions.append('image; line(' + x_label +', '+ top_y + ', ' + x_label + ', ' + bottom_y + ' ) # color=green ')
 				regions.append('image; text('+ x_label +', '+oh_label_y+') # color=green textangle=90 text={OH}')
@@ -2115,7 +2134,7 @@ class spec2d:
 			num_lines = len(show_lines.wave)
 			x_labels = x_interp(show_lines.wave)
 			#number of lines to display
-			for j in xrange(num_lines): #Label the lines
+			for j in range(num_lines): #Label the lines
 				x_label = str(x_labels[j])
 				regions.append('image; line(' + x_label +', '+ top_y + ', ' + x_label + ', ' + bottom_y + ' ) # color=red ')
 				regions.append('image; text('+ x_label +', '+label_y+') # color=red textangle=90 text={'+show_lines.label[j]+'}')
@@ -2127,7 +2146,7 @@ class spec2d:
 		ds9.set('regions ' + region_file_path)
 	# def s2n(self): #Estimate noise per pixel
 	# 	s2n_obj = copy.deepcopy(self)
-	# 	for i in xrange(self.n_orders): #Loop through each order
+	# 	for i in range(self.n_orders): #Loop through each order
 	# 		median_flux = robust_median_filter(self.orders[i].flux, size=4) #median smooth by four pixels, about the specral & spatial resolution
 	# 		random_noise = abs(self.orders[i].flux - median_flux) #Subtract flux from smoothed flux, this should give back the noise
 	# 		total_noise = sqrt(random_noise**2 + abs(self.orders[i].flux)) #Calculate S/N from measured random noise and from poisson noise from signal
@@ -2136,7 +2155,7 @@ class spec2d:
 	# 	return s2n_obj 
 	def deredden(self, A_V): #Deredden spectrum with an assumed A_V, and the extinction curve from Rieke & Lebofsky (1985) Table 3 (see "redden" definition)
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
-			print 'No spectrum of combined orders found.  Createing combined spectrum.'
+			print('No spectrum of combined orders found.  Createing combined spectrum.')
 			self.combine_orders() #If combined spectrum does not exist, combine the orders 
 		R = 3.09 #Assume a Milky way like dust
 		E_BV = (-A_V) / R #Calcualte reverse E_BV, by taking the negative of the known A_V
@@ -2209,7 +2228,7 @@ class lines:
 		for file in files: #Load multiple lists if needed
 			if file != 'none':
 				input_wave = loadtxt(list_dir+file, unpack=True, dtype='f', delimiter='\t', usecols=(0,)) #Read in line list wavelengths
-				input_label = loadtxt(list_dir+file, unpack=True, dtype='a', delimiter='\t', usecols=(1,)) #Read in line list labels
+				input_label = loadtxt(list_dir+file, unpack=True, dtype='U', delimiter='\t', usecols=(1,)) #Read in line list labels
 				new_wave = input_wave + input_wave*(delta_v[count]/c) #Shift a line list by some delta_v given by the user
 				lab_wave = append(lab_wave, input_wave) #Save wavelengths in the lab frame as well, for later 
 				wave = append(wave, new_wave) #Add lines from one list to the (new) wavelength array
@@ -2247,7 +2266,7 @@ def robust_median_filter(input_flux, size = half_block):
 		nx = len(flux) #Calculate npix
 	median_result = zeros(nx) #Create array that will store the smoothed median spectrum
 	if ndim(flux) == 2: #Run this loop for 2D
-		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
+		for i in range(nx): #This loop does the running of the median down the spectrum each pixel
 			x_left, x_right = i + half_sizes
 			if x_left < 0:
 				x_left = 0
@@ -2255,7 +2274,7 @@ def robust_median_filter(input_flux, size = half_block):
 				x_right = nx
 			median_result[i] = nanmedian(flux[:,x_left:x_right]) #Calculate median between x_left and x_right for a given pixel
 	else: #Run this loop for 1D
-		for i in xrange(nx): #This loop does the running of the median down the spectrum each pixel
+		for i in range(nx): #This loop does the running of the median down the spectrum each pixel
 			x_left, x_right = i + half_sizes
 			if x_left < 0:
 				x_left = 0
@@ -2305,7 +2324,7 @@ def fill_nans(x, y):
 	#num_dimensions = ndim(sci.orders[0].wave) #Store number of dimensions
 	#if num_dimensions == 2:
 		#slit_pixel_length = len(sci.orders[0].flux[:,0]) #Height of slit in pixels for this target and band
-	#for i in xrange(sci.n_orders): #Loop through each order
+	#for i in range(sci.n_orders): #Loop through each order
 		#if quality_cut: #Generally we throw out bad pixels, but the user can turn this feature off by setting quality_cut = False
 			###goodpix = logical_and(sci.orders[i].flux > -100.0, std.orders[i].flux > .1)  #apply the mask
 			#goodpix = std.orders[i].flux > .1
@@ -2319,7 +2338,7 @@ def fill_nans(x, y):
 	
 ##Test expanding and than contracting 2D spectrum for continuum subtraction
 #def test_expand_contract(flux):
-	#print 'TESTING EXPANSION AND CONTRACTION'
+	#print('TESTING EXPANSION AND CONTRACTION')
 	##stop()
 	#flux[~isfinite(flux)] = 0.0 #Make the last few nans =0 so we can actually zoom, (most nans have already been filled)
 	#expand = zoom(flux, 4)
@@ -2358,7 +2377,7 @@ class find_lines:
 		clf()
 		interp_velocity_grid = arange(v_range[0], v_range[1], 0.01) #Velocity grid to interpolate line profiles onto
 		master_profile_stack = zeros(size(interp_velocity_grid))
-		#for i in xrange(sci.n_orders): #Loop through each order
+		#for i in range(sci.n_orders): #Loop through each order
 		for order in sci.orders:
 			wave = order.wave
 			flux = order.flux
@@ -2426,9 +2445,9 @@ class find_lines:
 		#plot(wave, flux_smoothed) #Plot fit
 		#plot(wave_maxima, flux_maxima, 'o', color='red') #Plot maxima found that pass the cut
 		#plot(wave, spline_obj.derivitive(
-		#print 'TEST SMOOTHING CONTINUUM'
+		#print('TEST SMOOTHING CONTINUUM')
 		#for i in range(len(extrema)): #Print results
-			#print extrema[i], extrema_sec_deriv[i]
+			#print(extrema[i], extrema_sec_deriv[i])
 		#Now cut out lines that are below a standard deviation cut
 		#####stddev_flux = std(flux) #Stddeviation of the pixel fluxes
 		#####maxima_stddev = flux_maxima / stddev_flux
@@ -2481,6 +2500,6 @@ class find_lines:
 		g_fwhm = g_stddev * 2.355
 		g_flux = g(self.velocity) 
 		g_residuals = self.profile - g_flux
-		print 'Median line profile FWHM: ', g_fwhm
+		print('Median line profile FWHM: ', g_fwhm)
 		return(g(self.velocity)) #Return gaussian fit
 
