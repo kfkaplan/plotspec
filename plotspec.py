@@ -646,11 +646,11 @@ class position_velocity:
 			pause(0.001)
 			print('Line = ', self.label[i]) #Print info about line in command line
 			print('Wave = ', self.lab_wave[i])
-			answer = raw_input('Include in list? (y/n) ') #Ask user if they want to include this line in the line list
+			answer = input('Include in list? (y/n) ') #Ask user if they want to include this line in the line list
 			if answer == 'Y' or answer == 'y':
 				save_text.append('%1.10f' % self.lab_wave[i] + '\t' + self.label[i])
 		print('DONE WITH LIST!')
-		output_filename = 'line_lists/' + raw_input('Please give a filename for the line list: ')
+		output_filename = 'line_lists/' + input('Please give a filename for the line list: ')
 		savetxt(output_filename, save_text, fmt="%s") #Output line list
 		#ion() #Turn interactive plotting mode back on 0
 	def calculate_moments(self, vrange=[-set_velocity_range, set_velocity_range], prange=[0,0], s2n_cut=0.0, s2n_smooth=0.): #Calculate (mathematical) moments of the flux in velocity and position space; explicitely calculates  moments 0, 1, 2 = flux, mean, variance
@@ -761,12 +761,12 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		n_lines = len(pv_data[:,0,0]) #Read out number of lines
 		velocity_range = [flat_nanmin(pv.velocity), flat_nanmax(pv.velocity)]
 		if file == '' and line == '': #If no region file is specified by the user, prompt user for the path to the region file
-			file = raw_input('What is the name of the region file? ')
+			file = input('What is the name of the region file? ')
 		if background == '': #If no background region file is specified by the user, ask if user wants to specify region, and if so ask for path
-			answer = raw_input('Do you want to designate a specific region to measure the median background (y) or just use the whole postage stamp (n)? ')
+			answer = input('Do you want to designate a specific region to measure the median background (y) or just use the whole postage stamp (n)? ')
 			if answer == 'y':
 				print('Draw DS9 region around part(s) of line you want to measure the median background for and save it as a .reg file in the scratch directory.')
-				background == raw_input('What is the name of the region file? ')
+				background == input('What is the name of the region file? ')
 				use_background_region = True
 			else:
 				use_background_region = False
@@ -1135,8 +1135,8 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 		#pv_shape = shape(pv_data[0,:,:]) #Read out shape of a 2D slice of the pv diagram cube
 		n_lines = pv.n_lines #Read out number of lines
 		if range == [0,0]: #If user does not specify velocity range, ask for it from user
-			low_range = float(raw_input('What is blue velocity limit? '))
-			high_range = float(raw_input('What is red velocity limit? '))
+			low_range = float(input('What is blue velocity limit? '))
+			high_range = float(input('What is red velocity limit? '))
 		on_target = (velocity > vrange[0]) & (velocity < vrange[1]) #Find points inside user chosen velocity range
 		off_target = ~on_target #Find points outside user chosen velocity range
 		#figure(figsize=(4.0,3.0), frameon=False) #Set up figure check size
@@ -2303,7 +2303,7 @@ def mask_lines(spec, linelist, vrange =[-10.0,10.0], ndim=1):
 
 #Pauses execution of code to wait for user to hit a key on the command line
 def wait():
-	raw_input('Press Enter to continue.')
+	input('Press Enter to continue.')
 
 
 #Simple linear interpolation over nan values

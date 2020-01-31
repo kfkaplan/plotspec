@@ -33,11 +33,11 @@ pv = position_velocity(spec1d.combospec, spec2d.combospec, demo_lines) #Extract 
 pv.view(line='H2 1-0 S(1)', printlines=True, pause=True, close=True) #View extracted lines and draw circle around them.
 pv = position_velocity(spec1d.combospec, spec2d.combospec, h2_lines) #Extract and create a datacube in position-velocity space of all lines in line list(s) found in spectrum
 demo_extract_region =  region(pv, file='demo.reg', background='all', name='Demo Region', show_regions=True) #Extract flux for region defined in DS9
-ans = raw_input('Press any key to continue.')
+ans = input('Press any key to continue.')
 #~~~~~~~~~~~~~~~~~~~~~~~S/N EXTRACTION~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 demo_extract_sn = region(pv, name='SN_Demo', background='all', optimal_extraction=True, line='1-0 S(1)', pixel_range=[-10,10], weight_threshold=0.5, savepdf=True) #Grab line fluxes from a user specified region, here defined in this script
 #demo_extract_sn = region(pv, name='SN_Demo', background='all', s2n_cut = 0.0, s2n_mask = 5.0, line='1-0 S(1)', pixel_range=[-10,10]) #Grab line fluxes from a user specified region, here defined in this script
-ans = raw_input('Press any key to continue.')
+ans = input('Press any key to continue.')
 #~~~~~~~~~~~~~~~~~~~~MAKE A PLOT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 h2_demo = h2.make_line_list() #Set up object for storing H2 transitions
 #h2_demo.set_flux(demo_extract_sn)  #Read H2 line fluxes into object to calculate dolumn density of H2
