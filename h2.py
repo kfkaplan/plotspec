@@ -26,6 +26,7 @@ wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure
 #cloudy_dir = '/Volumes/IGRINS_Data/CLOUDY/'
 #cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
 cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
+#cloudy_dir = '/Users/kkaplan1/Desktop/workathome_igrins_data/CLOUDY/'
 data_dir = 'data/' #Directory where H2 data is stored for cloudy
 # energy_table = data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 # transition_table = data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -560,17 +561,17 @@ class differential_extinction:
 	
 def import_cloudy(model=''): #Import cloudy model from cloudy directory
 	h = make_line_list() #Make H2 transitions object
-	paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model from process_model/input.dat
-	input_model = paths.readline().split(' ')[0]
-	distance = float(paths.readline().split(' ')[0])
-	inner_radius = float(paths.readline().split(' ')[0])
-	slit_area = float(paths.readline().split(' ')[0])
-	data_dir =  paths.readline().split(' ')[0]
-	plot_dir = paths.readline().split(' ')[0]
-	table_dir =  paths.readline().split(' ')[0]
-	paths.close()
-	if model == '': #If no model is specified by the user, read in model set in process_model/input.dat
-		model = input_model
+	# paths = open(cloudy_dir + 'process_model/input.dat') #Read in current model from process_model/input.dat
+	# input_model = paths.readline().split(' ')[0]
+	# distance = float(paths.readline().split(' ')[0])
+	# inner_radius = float(paths.readline().split(' ')[0])
+	# slit_area = float(paths.readline().split(' ')[0])
+	# data_dir =  paths.readline().split(' ')[0]
+	# plot_dir = paths.readline().split(' ')[0]
+	# table_dir =  paths.readline().split(' ')[0]
+	# paths.close()
+	# if model == '': #If no model is specified by the user, read in model set in process_model/input.dat
+	# 	model = input_model
 	#READ IN LEVEL COLUMN DENSITY FILE
 	# filename = data_dir+model+".h2col" #Name of file to open
 	# v, J, E, N, N_over_g, LTE_N, LTE_N_over_g = loadtxt(filename, skiprows=4, unpack=True) #Read in H2 column density file
@@ -578,7 +579,8 @@ def import_cloudy(model=''): #Import cloudy model from cloudy directory
 	# 	found_transitions = (h.V.u == v[i]) & (h.J.u == J[i]) #Find all rovibrational transitions that match the upper v and J
 	# 	h.N[found_transitions] = N[i] #Set column density of transitions
 	#READ IN LINE EMISSION FILE AND CONVERT LINE EMISSION TO COLUMN DENSITIES
-	filename = data_dir+model+'.h2.lines'
+	#filename = data_dir+model+'.h2.lines'
+	filename = cloudy_dir + '/run/' +model+'.h2.lines'
 	line, wl_lab = loadtxt(filename, unpack=True, dtype='S', delimiter='\t', usecols=(0,8))
 	Ehi, Vhi, Jhi, Elo, Vlo, Jlo = loadtxt(filename, unpack=True, dtype='int', delimiter='\t', usecols=(1,2,3,4,5,6))
 	wl_mic, log_L, I_ratio, Excit, gu_h_nu_aul =  loadtxt(filename, unpack=True, dtype='float', delimiter='\t', usecols=(7,9,10,11,12))
@@ -1792,23 +1794,23 @@ class states:
 		self.A_tot_out = zeros(self.n_states)
 		self.k_tot_out = zeros(self.n_states) #Estimated k tot (collision rate coeff.) for collisional transitions
 		self.transitions = make_line_list() #Create transitions list 
-		# self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
-		# self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
-		# self.transitions.gbar_approx() #Estiamte collisional rate coeffs based on section 2.1.1 of Shaw et al. (2005)
-		# for i in range(self.transitions.n_lines):
-		# 	if self.transitions.J.u[i] <= max_J and self.transitions.J.l[i] <= max_J:
-		# 		self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
-		# 		self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
-		# for i in range(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
-		# 	transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i])  #Find transitions out of this state
-		# 	transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i]) 
-		# 	self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
-		# 	self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
-		# 	self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
-		# 	self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state])
-		# 	self.k_tot_out[i] = sum(self.transitions.k[transitions_out_of_this_state])
-		# self.ncr = self.A_tot_out / self.k_tot_out #Estimate critical densities
-		# self.test_n = self.Q * self.tau
+		self.transitions.upper_states = zeros(self.transitions.n_lines, dtype=int) #set up index to upper states
+		self.transitions.lower_states = zeros(self.transitions.n_lines, dtype=int) #Set up index to lower states
+		self.transitions.gbar_approx() #Estiamte collisional rate coeffs based on section 2.1.1 of Shaw et al. (2005)
+		for i in range(self.transitions.n_lines):
+			if self.transitions.J.u[i] <= max_J and self.transitions.J.l[i] <= max_J:
+				self.transitions.upper_states[i] = where((J == self.transitions.J.u[i]) & (V == self.transitions.V.u[i]))[0][0] #Find index of upper states 
+				self.transitions.lower_states[i] = where((J == self.transitions.J.l[i]) & (V == self.transitions.V.l[i]))[0][0] #Find index of lower states 
+		for i in range(self.n_states): #Calculate relative lifetime of each level (inverse sum of transition probabilities), see Black & Dalgarno (1976) Eq. 4
+			transitions_out_of_this_state = (self.transitions.J.l == J[i]) & (self.transitions.V.l == V[i])  #Find transitions out of this state
+			transitions_into_this_state =  (self.transitions.J.u == J[i]) & (self.transitions.V.u == V[i]) 
+			self.tau[i] = sum(self.transitions.A[transitions_out_of_this_state])**-1 #Black & Dalgarno (1976) Eq. 4
+			self.Q[i] = sum(self.transitions.A[transitions_into_this_state])**-1 
+			self.A_tot_out[i] = sum(self.transitions.A[transitions_out_of_this_state]) #Black & Dalgarno (1976) Eq. 4
+			self.A_tot_in[i] = sum(self.transitions.A[transitions_into_this_state])
+			self.k_tot_out[i] = sum(self.transitions.k[transitions_out_of_this_state])
+		self.ncr = self.A_tot_out / self.k_tot_out #Estimate critical densities
+		self.test_n = self.Q * self.tau
 		self.start_cascade = False #Flag if cascade has started or not
 		#self.convergence = [] #Set up python list that will hold convergence of cascade
 		#UV pumping from Black & Dalgarno (1976) 

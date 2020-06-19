@@ -19,7 +19,7 @@ import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
 from scipy.ndimage.filters import median_filter #For cosmic ray removal
-from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel #For smoothing, not used for now, commented out
+from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel, interpolate_replace_nans #For smoothing, not used for now, commented out
 from pdb import set_trace as stop #Use stop() for debugging
 #ion() #Turn on interactive plotting for matplotlib
 from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
@@ -42,6 +42,8 @@ import matplotlib.gridspec as grd
 #save_path = '/home/kfkaplan/Desktop/results/'
 pipeline_path = '/Volumes/IGRINS_Data_Backup/plp/'
 save_path = '/Volumes/IGRINS_Data_Backup/results/' #Define path for saving temporary files'
+#pipeline_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/plp/'
+#save_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/results/'
 scratch_path = save_path + 'scratch/' #Define a scratch path for saving some temporary files
 if not os.path.exists(scratch_path): #Check if directory exists
 	print('Directory '+ scratch_path + ' does not exist.  Making new directory.')
@@ -65,6 +67,34 @@ c = 2.99792458e5 #Speed of light in km/s
 half_block = block / 2 #Half of the block used for running median smoothing
 #slit_length = slit_length - 1 #This is necessary to get the proper indexing
 
+
+
+#Definition takes a high resolution spectrum and rebins it (via interpolation and integration) onto a smaller grid
+#while conserving flux, based on Chad Bender's idea for "srebin"
+def srebin(oldWave, newWave, oldFlux):
+	nPix = len(newWave) #Number of pixels in new binned spectrum
+	newFlux = zeros(len(newWave)) #Set up array to store rebinned fluxes
+	interpObj = interp1d(oldWave, oldFlux, kind='linear', bounds_error=False) #Create a 1D linear interpolation object for finding the flux density at any given wavelength
+	#wavebindiffs = newWave[1:] - newWave[:-1] #Calculate difference in wavelengths between each pixel on the new wavelength grid
+	wavebindiffs = diff(newWave) #Calculate difference in wavelengths between each pixel on the new wavelength grid
+	wavebindiffs = hstack([wavebindiffs, wavebindiffs[-1]]) #Reflect last difference so that wavebindiffs is the same size as newWave
+	wavebinleft =  newWave - 0.5*wavebindiffs #Get left side wavelengths for each bin
+	wavebinright = newWave + 0.5*wavebindiffs #get right side wavelengths for each bin
+	fluxbinleft  = interpObj(wavebinleft)
+	fluxbinright = interpObj(wavebinright)
+	for i in range(nPix): #Loop through each pixel on the new wavelength grid
+		useOldWaves = (oldWave >= wavebinleft[i]) & (oldWave <= wavebinright[i]) #Find old wavelength points that are inside the new bin
+		nPoints = sum(useOldWaves)
+		wavePoints = zeros(nPoints+2)
+		fluxPoints = zeros(nPoints+2)
+		wavePoints[0] = wavebinleft[i]
+		wavePoints[1:-1] = oldWave[useOldWaves]
+		wavePoints[-1] = wavebinright[i]
+		fluxPoints[0] = fluxbinleft[i]
+		fluxPoints[1:-1] = oldFlux[useOldWaves]
+		fluxPoints[-1] = fluxbinright[i]
+		newFlux[i] =  0.5 * nansum((fluxPoints[:-1]+fluxPoints[1:])*diff(wavePoints)) / wavebindiffs[i]
+	return newFlux
 
 #~~~~~~~~~~~~~~~~~~~~~~~~Make a simple contour plot given three lists~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def contour_plot(x, y, z, nx=100, ny=100, levels=[3.,4.,5.,6.,7.,8.,9.,10.,15.,20.,30.,40.]): #Canned definition to make interpolated contour plots with three lists, based off of http://stackoverflow.com/questions/9008370/python-2d-contour-plot-from-3-lists-x-y-and-rho1
@@ -656,7 +686,8 @@ class position_velocity:
 	def calculate_moments(self, vrange=[-set_velocity_range, set_velocity_range], prange=[0,0], s2n_cut=0.0, s2n_smooth=0.): #Calculate (mathematical) moments of the flux in velocity and position space; explicitely calculates  moments 0, 1, 2 = flux, mean, variance
 		pv = copy.deepcopy(self.pv)
 		if s2n_cut > 0.:
-			g = Gaussian2DKernel(stddev=s2n_smooth)
+			#g = Gaussian2DKernel(stddev=s2n_smooth)
+			g = Gaussian2DKernel(s2n_smooth)
 			for i in range(len(pv)):
 				low_s2n_mask = convolve(pv[i], g) / self.var2d[i]**0.5 < s2n_cut
 				pv[i][low_s2n_mask] = nan
@@ -693,6 +724,71 @@ class position_velocity:
 		self.velocity_moment_mask = velocity_moment_mask #Store the moment masks
 		self.position_moment_mask = position_moment_mask
 		self.combined_moment_mask = combined_moment_mask
+	def fitmodel(self, fitter, model, slit_length=15.0): #for fitting 2D astropy models to a position_velocity object, outputs include model fit paramters, residuals, fluxes, and uncertainities in the fits
+		model_fits = [] #Array to store model fits
+		model_results =  zeros(shape(self.pv))
+		#x = self.velocity
+		#y = arange(self.slit_pixel_length, dtype=float)/slit_length
+		x, y = meshgrid(self.velocity, arange(self.slit_pixel_length, dtype=float)/slit_length)
+		gaussian_2d_kernel_for_replacing_nans = Gaussian2DKernel(0.5)
+		for i in range(self.n_lines): #Loop through each line and attempt to fit the model
+			data = interpolate_replace_nans(self.pv[i,:,:], gaussian_2d_kernel_for_replacing_nans) #Fill all nans, or else the model fitting does not work (nans screw it up)
+			weights = interpolate_replace_nans(data/ self.var2d[i,:,:]**0.5, gaussian_2d_kernel_for_replacing_nans)
+			model_fit = fitter(model, x, y, data, weights=weights) #Fit the model
+			for j in range(10): #Iterate on the model fit a bit to improve the fit
+				model_fit = fitter(model_fit, x, y, data)
+			model_fits.append(model_fit) #Add results from the model fit to an array that stores the model fit for each line
+			model_results[i,:,:] = model_fit(x, y)
+		self.model_fits = array(model_fits)
+		self.model_residuals = self.pv - model_results 
+		self.model_results = model_results
+		self.model_flux = nansum(model_results, axis=0)
+	def print_fitmodel(self, pdffilename): #Create pdf of 
+		pv_data = self.pv
+		pv_models = self.model_results
+		pv_residuals = self.model_residuals
+		line_labels = self.label
+		line_wave =  self.lab_wave
+		with PdfPages(save.path + pdffilename) as pdf: #Load pdf backend for saving multipage pdfs
+			for i in range(self.n_lines): #Loop through each line and attempt to fit the model
+				gs = grd.GridSpec(3, 1)
+				ax=subplot(gs[0])
+				imshow(pv_data[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm(), aspect='auto') #Plot data
+				suptitle(line_labels[i] +'  '+str(line_wave[i]))
+				colorbar()
+				ax=subplot(gs[1])
+				imshow(pv_models[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm(), aspect='auto') #Plot model
+				colorbar()
+				ax=subplot(gs[2])
+				imshow(pv_residuals[i,:,:]+1e7, cmap='gray', interpolation='Nearest', origin='lower', norm=LogNorm(), aspect='auto') #Plot residuals
+				colorbar()
+				pdf.savefig()
+	def get_fitmodel_attribute(self, attribute_strs, filter='', return_labels=True): #Returns an array of atributes from the astropy models fit with def modelfit
+		return_this = []
+		if return_labels:
+			labels = []
+			for i in range(self.n_lines):
+				if any(filter in self.label[i]):
+					labels.append(self.label[i])
+			return_this.append(array(labels))
+		if size(attribute_strs) == 1:
+			attribute_strs = [attribute_strs]		
+		for attribute_str in attribute_strs:
+			attribute = []
+			for i in range(self.n_lines):
+				if any(filter in self.label[i]):
+					attribute.append(getattr(self.model_fits[i], attribute_str))
+			return_this.append(attribute)
+		return return_this
+	def get_median_fitmodel_attribute(self, attribute_strs, filter=''):
+		n_attributes = len(attribute_strs)
+		median_attributes = zeros(n_attributes)
+		results = self.get_fitmodel_attribute(attribute_strs, filter, return_labels=False)
+		median_results = []
+		for i in range(n_attributes):
+			median_results.append(nanmedian(results[i]))
+		return median_results
+
 	# def get_moment(self, moment, line): #Specify desired moment and line and return the result
 	# 	if not hasattr(self, 'moments'): #Check if moments have been calculated yet
 	# 		print('Moments not yet calculated.  Claculating now.')
@@ -736,11 +832,19 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 		sigma = nansum(variance*shifted_weights**2)**0.5  #Calculate weighted sigma
 		#flux = nansum((median_smoothed_data-background)*shifted_weights) #Calcualte weighted flux
 		#sigma = sqrt( nansum(median_smoothed_variance*shifted_weights**2) ) #Calculate weighted sigma
-		s2n[i] = flux / sigma
+		if flux == 0.: #Divide by zero error catch
+			s2n[i] == 0.
+		else:
+			s2n[i] = flux / sigma
 	if all(isnan(s2n)): #Check if everything in the s2n array is nan, if so this is a bad part of the spectrum
 		return 0 #so return a zero and move along
 	else: #Otherwise we got something decent so...
 		return shift_pixels[s2n == flat_nanmax(s2n)][0] #Return pixel shift that maximizes the s2n
+
+
+
+
+
 
 
 
@@ -854,7 +958,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				# f = pv_data[i,:,:]
 				# s = nanmedian(f[p == 0.0])
 				# m = ones(pv_shape) 
-				# #sigma_clip_bad_pix = (f - s - nansum(f-s)*p)**2 > 10.0**2 * v
+				# #sigma_ _bad_pix = (f - s - nansum(f-s)*p)**2 > 10.0**2 * v
 				# #m[sigma_clip_bad_pix] = 0.
 				# p_squared_divided_by_v = nansum(m * p**2 / v)
 				# try:
@@ -1193,10 +1297,10 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 
 #Convenience function for making a single spectrum object in 1D or 2D that combines both H & K bands while applying telluric correction and flux calibration
 #The idea is that the user can call a single line and get a single spectrum ready to go
-def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, y_power=1.0, y_sharpen=0.0,
+def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, y_power=1.0, y_sharpen=0.0,
 		twodim=True, usestd=True, no_flux=False, make_1d=False, median_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
 		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False, std_shift=0.0):
-	if usestd:
+	if usestd or tellurics:
 		#Make 1D spectrum object for standard star
 		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
 		K_std_obj = makespec(date, 'K', waveno, stdno) #Read in H-band
@@ -1209,6 +1313,19 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., B=0
 		stdflat_obj = H_stdflat_obj #Create master object
 		stdflat_obj.orders = K_stdflat_obj.orders + H_stdflat_obj.orders #Combine orders
 		stdflat_obj.n_orders = K_stdflat_obj.n_orders + H_stdflat_obj.n_orders #Find new total number of orders
+		if std_flexure != 0.: #If user specifies a flexure correction
+			if size(std_flexure) == 1: #If the correction is only one number, correct all orders
+				for i in range(std_obj.n_orders): #Loop through each order
+					std_obj.orders[i].flux = flexure(std_obj.orders[i].flux, std_flexure) #Apply flexure correction to 1D array
+					stdflat_obj.orders[i].flux = flexure(stdflat_obj.orders[i].flux, std_flexure) #Apply flexure correction to 1D array
+			else: #Else if correction has two numbers, the first number is the H band and hte second number is the K band
+				for i in range(std_obj.n_orders):#Loop through each order
+					if  std_obj.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
+						flexure_index = 0
+					else:
+						flexure_index = 1
+					std_obj.orders[i].flux = flexure(std_obj.orders[i].flux, std_flexure[flexure_index]) #Apply flexure correction to 1D array
+					stdflat_obj.orders[i].flux = flexure(stdflat_obj.orders[i].flux, std_flexure[flexure_index]) #Apply flexure correction to 1D array
 	#Make 1D spectrum object
 	H_sci1d_obj =  makespec(date, 'H', waveno, frameno) #Read in H-band
 	K_sci1d_obj =  makespec(date, 'K', waveno, frameno) #Read in K-band
@@ -2028,11 +2145,13 @@ class spec2d:
 	# 		find_nans = ~isfinite(self.combospec.flux[i, :]) #Locate holes to be filled
 	# 		self.combospec.flux[i, :][find_nans] = nanmedian_row_flux[find_nans] #Fill the holes with the median filter values
 	# 		self.combospec.noise[i, :][find_nans] = nanmedian_row_var[find_nans]**0.5
-	def subtract_median_vertical(self, use_edges=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
+	def subtract_median_vertical(self, use_edges=0, use_range=0): #Try to subtract OH residuals and other sky junk by median collapsing along slit and subtracting result. WARNING: ONLY USE FOR POINT OR SMALL SOURCES!
 		for i in range(self.n_orders-1): #Loop through each order
 			if use_edges > 0: #If user specifies using edges, use this many pixels from the edge on each side for median collapse
 				edges =concatenate([arange(use_edges), self.slit_pixel_length - arange(use_edges) -1])
 				median_along_slit = nanmedian(self.orders[i].flux[edges,:], axis=0) #Collapse median along slit
+			elif use_range != 0: #If user specifies a range of pixels to use along the slit (low values start at bottom)
+				median_along_slit = nanmedian(self.orders[i].flux[use_range[0]:use_range[1], :], axis=0)
 			else: #Else just median collapse the whole slit
 				median_along_slit = nanmedian(self.orders[i].flux, axis=0) #Collapse median along slit
 			self.orders[i].flux -= tile(median_along_slit, [self.slit_pixel_length,1]) #Subtract the median

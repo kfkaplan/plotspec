@@ -1,5 +1,7 @@
 #Energies from all H2 rovibrational levels from Roueff et al. (2019)
-#v J energy [cm^-2]
+#v J energy [cm^-1]
+0 0 0.0
+0 1 118.4867869999971
 0 2 354.3731039999984
 0 3 705.5188119999948
 0 4 1168.7974069999982

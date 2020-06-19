@@ -30,14 +30,15 @@ spec2d.combine_orders() #Combine all orders in 2D spectrum into one very long sp
 spec2d.plot(demo_lines, pause=True, close=True) #View long 2D spectrum
 #~~~~~~~~~~~~~~~~~~~~POSITION-VELOCITY DIAGRAMS AND ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 pv = position_velocity(spec1d.combospec, spec2d.combospec, demo_lines) #Extract and create a datacube in position-velocity space of all lines in line list(s) found in spectrum
-pv.view(line='H2 1-0 S(1)', printlines=True, pause=True, close=True) #View extracted lines and draw circle around them.
+pv.view(line='H2 1-0 S(1)', printlines=True, pause=True, close=False) #View extracted lines and draw circle around them.
 pv = position_velocity(spec1d.combospec, spec2d.combospec, h2_lines) #Extract and create a datacube in position-velocity space of all lines in line list(s) found in spectrum
 demo_extract_region =  region(pv, file='demo.reg', background='all', name='Demo Region', show_regions=True) #Extract flux for region defined in DS9
+show()
 ans = input('Press any key to continue.')
 #~~~~~~~~~~~~~~~~~~~~~~~S/N EXTRACTION~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-demo_extract_sn = region(pv, name='SN_Demo', background='all', optimal_extraction=True, line='1-0 S(1)', pixel_range=[-10,10], weight_threshold=0.5, savepdf=True) #Grab line fluxes from a user specified region, here defined in this script
-#demo_extract_sn = region(pv, name='SN_Demo', background='all', s2n_cut = 0.0, s2n_mask = 5.0, line='1-0 S(1)', pixel_range=[-10,10]) #Grab line fluxes from a user specified region, here defined in this script
-ans = input('Press any key to continue.')
+# demo_extract_sn = region(pv, name='SN_Demo', background='all', optimal_extraction=True, line='1-0 S(1)', pixel_range=[-10,10], weight_threshold=0.5, savepdf=True) #Grab line fluxes from a user specified region, here defined in this script
+# #demo_extract_sn = region(pv, name='SN_Demo', background='all', s2n_cut = 0.0, s2n_mask = 5.0, line='1-0 S(1)', pixel_range=[-10,10]) #Grab line fluxes from a user specified region, here defined in this script
+# ans = input('Press any key to continue.')
 #~~~~~~~~~~~~~~~~~~~~MAKE A PLOT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 h2_demo = h2.make_line_list() #Set up object for storing H2 transitions
 #h2_demo.set_flux(demo_extract_sn)  #Read H2 line fluxes into object to calculate dolumn density of H2
@@ -46,5 +47,6 @@ h2_demo.calculate_column_density() #Calculate column density of H2
 #Test making a plot
 use_V_ring = [1,2,3,4,5,6,7,8,9,10,11] #Plot the folowing vibration states
 h2_demo.v_plot(plot_single_temp=False, show_upper_limits=False, s2n_cut = 3.0, show_labels=False, V=use_V_ring, savepdf=True) #Plot Boltzmann Diagram
+show()
 
 
