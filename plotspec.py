@@ -71,10 +71,10 @@ half_block = block / 2 #Half of the block used for running median smoothing
 
 #Definition takes a high resolution spectrum and rebins it (via interpolation and integration) onto a smaller grid
 #while conserving flux, based on Chad Bender's idea for "srebin"
-def srebin(oldWave, newWave, oldFlux):
+def srebin(oldWave, newWave, oldFlux, kind='linear'):
 	nPix = len(newWave) #Number of pixels in new binned spectrum
 	newFlux = zeros(len(newWave)) #Set up array to store rebinned fluxes
-	interpObj = interp1d(oldWave, oldFlux, kind='linear', bounds_error=False) #Create a 1D linear interpolation object for finding the flux density at any given wavelength
+	interpObj = interp1d(oldWave, oldFlux, kind=kind, bounds_error=False) #Create a 1D linear interpolation object for finding the flux density at any given wavelength
 	#wavebindiffs = newWave[1:] - newWave[:-1] #Calculate difference in wavelengths between each pixel on the new wavelength grid
 	wavebindiffs = diff(newWave) #Calculate difference in wavelengths between each pixel on the new wavelength grid
 	wavebindiffs = hstack([wavebindiffs, wavebindiffs[-1]]) #Reflect last difference so that wavebindiffs is the same size as newWave
@@ -442,7 +442,7 @@ class position_velocity:
 			interp_flux_2d = interp1d(ungridded_velocities, ungridded_flux_2d, kind='linear', bounds_error=False) #Create interp obj for 2D flux
 			interp_variance_2d = interp1d(ungridded_velocities, ungridded_variance_2d, kind='linear', bounds_error=False) #Create interp obj for 2D variance
 			gridded_wavelengths = interp_wave(interp_velocity) #Get wavelengths as they appear on the velocity grid
-			dl_dv = (gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1]) / set_velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
+			dl_dv = (gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1]) / velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
 			dl_dv = hstack([dl_dv, dl_dv[len(dl_dv)-1]]) #Add an extra thing at the end of the delta-lambda/delta-velocity array so that it has an equal number of elements as everything else here
 			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
 			gridded_variance_2d = interp_variance_2d(interp_velocity) * dl_dv**2 #PV diagram variance velocity gridded
@@ -1415,12 +1415,12 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std
 			with PdfPages(save.path + 'check_OH_correction.pdf') as pdf: #Create PDF showing OH correction for user inspection
 				clf()
 				for i in range(sci1d_obj.n_orders): #Save whole spectrum at once
-					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
-					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data')
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction', linewidth=0.1)
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data', linewidth=0.1)
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data', linewidth=0.1)
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data', linewidth=0.1)
 					if i==0:
 						legend(loc='upper right', fontsize=9) #Only plot legend for first set 
 				xlabel('$\lambda$ [$\mu$m]')
@@ -1431,12 +1431,12 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std
 				for i in range(sci1d_obj.n_orders): #Then save each order for closer inspection
 					clf()
 					#()
-					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction')
-					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data')
+					plot(oh1d.orders[i].wave, oh1d.orders[i].flux, color='red', label='Differential Sky Subtraction', linewidth=0.1)
+					plot(sci1d_obj.orders[i].wave, sci1d_obj.orders[i].flux, ':', color='black', label='Uncorrected Science Data', linewidth=0.1)
 					if  oh1d.orders[i].wave[0] < 1.85: #check which band we are in, index=0 is H band, 1 is K band
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[0], color='black', label='OH Corrected Science Data', linewidth=0.1)
 					else:
-						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data')
+						plot(oh1d.orders[i].wave, sci1d_obj.orders[i].flux -  oh1d.orders[i].flux*oh_scale[1], color='black', label='OH Corrected Science Data', linewidth=0.1)
 					xlabel('$\lambda$ [$\mu$m]')
 					ylabel('Relative Flux')
 					legend(loc='upper right',fontsize=9)
@@ -1703,16 +1703,16 @@ class spec1d:
 		#combospec.s2n = combospec.s2n[0:xr]
 		self.combospec = combospec #save the orders all stitched together
 	#Simple function for plotting a 1D spectrum orders
-	def plot(self, combospec=False):
+	def plot(self, combospec=False, **kwargs):
 		#clf()
 		if combospec: #If user specifies, plot the combined spectrum (stitched together orders)
-			plot(self.combospec.wave, self.combospec.flux)
+			plot(self.combospec.wave, self.combospec.flux, **kwargs)
 		else: #or else just plot each order seperately (each a different color)
 			for order in self.orders: #Plot each order
-				plot(order.wave, order.flux)
+				plot(order.wave, order.flux, **kwargs)
 		xlabel('Wavelength [$\mu$m]')
 		ylabel('Relative Flux')
-		show()
+		#show()
 		#draw()
 	#Plot spectrum with lines from line list overplotted
 	def plotlines(self, linelist, threshold=0.0, model='', rows=5, ymax=0.0, fontsize=9.5, relative=False):
@@ -1743,8 +1743,10 @@ class spec1d:
 			subplot(rows,1,j+1) #split into multiple plots
 			sci_in_range = logical_and(self.combospec.wave > wave_range[0], self.combospec.wave < wave_range[1]) #Find portion of spectrum in single row
 			sub_linelist = linelist.parse(wave_range[0], wave_range[1]) #Find lines in single row
-			wave_to_interp = append(insert(self.combospec.wave, 1.0, 0.0), 3.0) #Interpolate IGRINS spectrum to allow line labels to be placed in correct position in figure
-			flux_to_interp = append(insert(self.combospec.flux, 0, 0.0), 0.0)
+			#wave_to_interp = append(insert(self.combospec.wave, 1.0, 0.0), 3.0) #Interpolate IGRINS spectrum to allow line labels to be placed in correct position in figure
+			#flux_to_interp = append(insert(self.combospec.flux, 0, 0.0), 0.0)
+			wave_to_interp = hstack([1.4, self.combospec.wave, 2.5]) ##Interpolate IGRINS spectrum to allow line labels to be placed in correct position in figure
+			flux_to_interp = hstack([0.0, self.combospec.flux, 0.0])
 			sci_flux_interp = interp1d(wave_to_interp, flux_to_interp) #Get interpolation object of science spec.
 			sub_linelist.flux = sci_flux_interp(sub_linelist.wave) #Get height of spectrum for each individual line
 			for i in range(len(sub_linelist.wave)):#Output label for each emission lin
@@ -1882,6 +1884,8 @@ class spec1d:
 		#self.combospec.noise = self.combospec.noise * dereddening
 		self.combospec.flux = self.combospec.flux * 10**(0.4*A_lambda) #Apply dereddening to flux and noise
 		self.combospec.noise = self.combospec.noise * 10**(0.4*A_lambda)
+
+
 
 		
 

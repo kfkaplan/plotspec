@@ -11,6 +11,7 @@ import copy
 from scipy.linalg import lstsq
 from bottleneck import *
 from astropy.io import ascii
+from numpy import random
 #from numba import jit #Import numba
 
 
@@ -711,8 +712,8 @@ class h2_transitions:
 		self.sigma = zeros(n_lines) #Set initial sigma (uncertainity) for each line
 		self.s2n = zeros(n_lines) #Set initial signal-to-noise ratio for each line
 		self.label = self.makelabel() #Make label of spectroscpic notation
-		g_ortho_para = 1 + 2 * (J.u % 2 == 1) #Calculate the degenearcy for ortho or para hydrogen
-		self.g = g_ortho_para * (2*J.u+1) #Store degeneracy
+		g_ortho_para = 1.0 + 2.0 * (J.u % 2.0 == 1.0) #Calculate the degenearcy for ortho or para hydrogen
+		self.g = g_ortho_para * (2.0*J.u+1.0) #Store degeneracy
 		self.T = E.u / k #Store "temperature" of the energy of the upper state
 		self.wave = E.getwave() #Store wavelength of transitions
 		self.path = '' #Store path for saving excitation diagram and other files, read in when reading in region with definition set_Flux
@@ -1615,6 +1616,294 @@ class h2_transitions:
 			k_total += exp( y0[i] + a[i]*(E_trans**b[i]) ) #Eq 1 in Shaw et al. (2005)
 		#k_total[k_total < 0.] = 0. #Ignore negative coefficients
 		self.k = k_total #Store the estimated collisional reate coeffs for each transition
+	# def find_ortho_to_para_ratio(self, s2n_cut = 5.0): #Function to find the best fit ortho-to-para ratio
+	# 	op_ratio = arange(3.5, 1.2, -0.1) #Range of OP ratios to check
+	# 	n_op_ratio = len(op_ratio) #Count number of OP ratios to check
+	# 	chisq = zeros(n_op_ratio) #Set up array to store chisq results for a given OP ratio tested
+	# 	ortho_levels = (self.J.u % 2 == 1) #Find all ortho levels
+	# 	para_levels = ~ortho_levels #Find all para levels
+	# 	#p_init = models.Polynomial1D(degree=2) #Initialize a 3rd degree polynomial for fitting rotation ladders
+	# 	#fit_p = fitting.SimplexLSQFitter()
+	# 	base_op_ratio = 3.0 #Base OP ratio
+	# 	self.g[ortho_levels] /= base_op_ratio #Remove base OP ratio before doing anything
+	# 	for i in range(n_op_ratio): #Loop through each OP ratio to test
+	# 		self.g[ortho_levels] *= op_ratio[i] #Apply this OP ratio to test
+	# 		for v in range(14): #Loop through all possible v levels
+	# 			good_ortho_levels = (self.V.u == v) & (self.s2n >= s2n_cut) & ortho_levels #Find all good data points in this 
+	# 			good_para_levels = (self.V.u == v) & (self.s2n >= s2n_cut) & para_levels #Find all good data points in this 
+	# 			if (sum(good_ortho_levels) > 2) and (sum(good_para_levels) > 2):
+	# 				ortho_x = self.T[good_ortho_levels]
+	# 				ortho_y = log(self.N[good_ortho_levels] / self.g[good_ortho_levels])
+	# 				para_x = self.T[good_para_levels]
+	# 				para_y = log(self.N[good_para_levels] / self.g[good_para_levels])
+	# 				interp_obj = interp1d(ortho_x, ortho_y, bounds_error=False, fill_value='extrapolate')
+	# 				interp_y = interp_obj(para_x)
+	# 				#print('interp_y', interp_y)
+	# 				#print('para_x', para_x)
+	# 				use_finite = isfinite(interp_y) & isfinite(para_y)
+	# 				chisq[i] += nansum((interp_y[use_finite]-para_y[use_finite])**2)
+	# 			#y = log(self.N[good_levels] / self.g[good_levels])
+	# 			#p = fit_p(p_init, x, y)
+	# 			#fit_y = p(x)
+	# 			#chisq[i] += nansum((y - fit_y)**2)
+	# 		print(op_ratio[i], chisq[i])
+	# 		self.g[ortho_levels] /= op_ratio[i] #Remove this OP ratio now that has been tested so we can move onto the next one to test
+	# 	self.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+	# def find_ortho_to_para_ratio(self, s2n_cut = 3.0): #Function to find the best fit ortho-to-para ratio
+
+	# 	h_compare = copy.deepcopy(self) #Find weighted mean of all column densities for a given level
+	# 	for J in range(0,50):
+	# 		for V in range(1,15): #Loop through each V ladder
+	# 			use_these = (h_compare.J.u == J) & (h_compare.V.u==V) & (h_compare.N > 0.)
+	# 			if any(use_these):
+	# 				# variance = 1.0 / nansum(h_compare.Nsigma[use_these]**-2)
+	# 				# weighted_mean = variance * nansum(h_compare.N[use_these] / h_compare.Nsigma[use_these]**2)
+
+	# 				# h_compare.N[use_these] = weighted_mean
+	# 				# h_compare.Nsigma[use_these] = sqrt(variance)
+	# 				h_compare.N[use_these] = exp(nanmean(log(h_compare.N[use_these])))
+
+
+	# 	ortho_levels = (self.J.u % 2 == 1) #Find all ortho levels
+	# 	para_levels = ~ortho_levels #Find all para levels
+	# 	base_op_ratio = 3.0 #Base OP ratio
+	# 	h_compare.g[ortho_levels] /= base_op_ratio #Remove base OP ratio before doing anything
+	# 	self.g[ortho_levels] /= base_op_ratio
+	# 	ratios = [] #List to hold the ratios
+	# 	ratio_variances = []
+	# 	for v in range(14): #Loop through all possible v levels
+	# 		good_ortho_levels = (self.V.u == v) & (self.s2n >= s2n_cut) & ortho_levels #Find all good data points in this 
+	# 		good_para_levels = (self.V.u == v) & (self.s2n >= s2n_cut) & para_levels #Find all good data points in this 
+	# 		if (sum(good_ortho_levels) > 2) and (sum(good_para_levels) > 2):
+	# 			ortho_x = self.T[good_ortho_levels]
+	# 			ortho_y = (self.N[good_ortho_levels] / self.g[good_ortho_levels])
+	# 			ortho_y_to_interp = (h_compare.N[good_ortho_levels] / h_compare.g[good_ortho_levels])
+	# 			ortho_y_sigma = (self.Nsigma[good_ortho_levels] / self.g[good_ortho_levels])
+	# 			para_x = self.T[good_para_levels]
+	# 			para_y = (self.N[good_para_levels] / self.g[good_para_levels])
+	# 			para_y_to_interp = (h_compare.N[good_para_levels] / h_compare.g[good_para_levels])
+	# 			para_y_sigma = (self.Nsigma[good_para_levels] / self.g[good_para_levels])
+
+	# 			order_para = para_x.argsort()
+	# 			order_ortho = ortho_x.argsort()
+	# 			para_x = para_x[order_para].data
+	# 			para_y = para_y[order_para].data
+	# 			para_y_to_interp = para_y_to_interp[order_para].data
+	# 			para_y_sigma = para_y_sigma[order_para].data
+	# 			ortho_x = ortho_x[order_ortho].data
+	# 			ortho_y = ortho_y[order_ortho].data
+	# 			ortho_y_to_interp = ortho_y_to_interp[order_ortho].data
+	# 			ortho_y_sigma = ortho_y_sigma[order_ortho].data
+
+	# 			ortho_interp_obj = interp1d(ortho_x, log(ortho_y_to_interp), fill_value='extrapolate')
+	# 			ortho_y_interpolated = exp(ortho_interp_obj(para_x))
+
+
+	# 			para_interp_obj = interp1d(para_x, log(para_y_to_interp), fill_value='extrapolate')
+	# 			para_y_interpolated = exp(para_interp_obj(ortho_x))
+
+	# 			# use_finite = isfinite(interp_y) & isfinite(para_y)
+
+	# 			# figure(v)
+	# 			# clf()
+	# 			# suptitle('v = '+str(v))
+	# 			# plot(para_x[use_finite], (interp_y/para_y)[use_finite])
+
+	# 			# ratio_for_this_v = (interp_y/para_y)[use_finite]
+	# 			# ratio_variance_for_this_v = (ratio_for_this_v**2 * ((para_y_sigma[use_finite]/para_y[use_finite])**2 + (0.3)**2))
+	# 			# ratios = ratios + ratio_for_this_v.tolist()
+	# 			# ratio_variances = ratio_variances + ratio_variance_for_this_v.tolist()
+	# 			ortho_ratio_for_this_v = (ortho_y/para_y_interpolated)
+	# 			para_ratio_for_this_v = (ortho_y_interpolated/para_y)
+
+	# 			ortho_ratio_variance_for_this_v = (ortho_ratio_for_this_v**2 * ((ortho_y_sigma/ortho_y)**2 + (0.2)**2))
+	# 			para_ratio_variance_for_this_v = (para_ratio_for_this_v**2 * ((para_y_sigma/para_y)**2 + (0.2)**2))
+
+	# 			ratios = ratios + ortho_ratio_for_this_v.tolist() + para_ratio_for_this_v.tolist()
+	# 			ratio_variances = ratio_variances + ortho_ratio_variance_for_this_v.tolist() + para_ratio_variance_for_this_v.tolist()
+
+	# 			print('For v = ', v)
+	# 			print('Ratio = ', ortho_ratio_for_this_v.tolist() + para_ratio_for_this_v.tolist())
+	# 	weighted_variance = (1.0 / nansum(1.0/array(ratio_variances)))
+	# 	weighted_mean =  nansum(array(ratios) / array(ratio_variances)) / nansum(1.0 / array(ratio_variances))
+
+
+	# 	print('Median O/P = ',nanmedian(ratios))
+	# 	print('Mean O/P = ', nanmean(ratios))
+	# 	print('Stddev O/P = ', nanstd(ratios))
+	# 	print('Weighted mean O/P = ', weighted_mean, '+/-', sqrt(weighted_variance))
+	# 	h_compare.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+	# 	self.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+	def find_ortho_to_para_ratio(self, s2n_cut = 3.0, bootstrap=False): #Function to find the best fit ortho-to-para ratio
+
+		h_compare = copy.deepcopy(self) #Find weighted mean of all column densities for a given level
+		for J in range(0,50):
+			for V in range(1,15): #Loop through each V ladder
+				use_these = (h_compare.J.u == J) & (h_compare.V.u==V) & (h_compare.N > 0.)
+				if any(use_these):
+					h_compare.N[use_these] = exp(nanmean(log(h_compare.N[use_these])))
+
+
+		ortho_levels = (self.J.u % 2 == 1) #Find all ortho levels
+		if bootstrap:
+			n_levels = len(ortho_levels)
+			para_levels = ~ortho_levels & random.choice([True,False], size=n_levels)
+		else:
+			para_levels = ~ortho_levels #Find all para levels
+		base_op_ratio = 3.0 #Base OP ratio
+		h_compare.g[ortho_levels] /= base_op_ratio #Remove base OP ratio before doing anything
+		self.g[ortho_levels] /= base_op_ratio
+		op_ratios = arange(1.0, 4.0, 0.01)
+		n_op_ratios = len(op_ratios)
+		chisq = zeros(n_op_ratios)
+		#fractional_uncertainity =  zeros(n_op_ratios)
+		n = zeros(n_op_ratios)
+		for i in range(n_op_ratios):
+			#ratios = [] #List to hold the ratios
+			#ratio_variances = []
+			h_compare.g[ortho_levels] *= op_ratios[i]
+			self.g[ortho_levels] *= op_ratios[i]
+			for v in range(14): #Loop through all possible v levels
+				good_all_levels =  (self.V.u == v) & (self.s2n >= s2n_cut) 
+				good_ortho_levels = good_all_levels & ortho_levels #Find all good data points in this 
+				good_para_levels = good_all_levels & para_levels #Find all good data points in this 
+
+				if (sum(good_ortho_levels) > 2) and (sum(good_para_levels) > 2):
+					good_all_levels_and_good_s2n = good_all_levels & (self.s2n >= s2n_cut)
+					x = self.T[good_all_levels_and_good_s2n]
+					ortho_x = self.T[good_ortho_levels]
+					ortho_y = (self.N[good_ortho_levels] / self.g[good_ortho_levels])
+					ortho_y_to_interp = (h_compare.N[good_ortho_levels] / h_compare.g[good_ortho_levels])
+					#ortho_y_sigma = (self.Nsigma[good_ortho_levels] / self.g[good_ortho_levels])
+					para_x = self.T[good_para_levels]
+					para_y = (self.N[good_para_levels] / self.g[good_para_levels])
+					#para_y_to_interp = (h_compare.N[good_para_levels] / h_compare.g[good_para_levels])
+					#para_y_sigma = (self.Nsigma[good_para_levels] / self.g[good_para_levels])
+
+					order_all = x.argsort()
+					order_para = para_x.argsort()
+					order_ortho = ortho_x.argsort()
+					x = x[order_all]
+					para_x = para_x[order_para].data
+					para_y = para_y[order_para].data
+					#para_y_to_interp = para_y_to_interp[order_para].data
+					#para_y_sigma = para_y_sigma[order_para].data
+					ortho_x = ortho_x[order_ortho].data
+					ortho_y = ortho_y[order_ortho].data
+					ortho_y_to_interp = ortho_y_to_interp[order_ortho].data
+					#ortho_y_sigma = ortho_y_sigma[order_ortho].data
+
+					ortho_interp_obj = interp1d(ortho_x, log(ortho_y_to_interp), fill_value='extrapolate')
+					#ortho_y_interpolated = exp(ortho_interp_obj(x))
+					#ortho_y_interpolated = exp(ortho_interp_obj(ortho_x))
+					ortho_y_interpolated = exp(ortho_interp_obj(para_x))
+					#para_interp_obj = interp1d(para_x, log(para_y_to_interp), fill_value='extrapolate')
+					#para_y_interpolated = exp(para_interp_obj(x))
+					#para_y_interpolated = exp(para_interp_obj(ortho_x))
+					#para_y_interpolated = exp(para_interp_obj(para_x))
+					
+					#chisq[i] += nansum((ortho_y_interpolated - para_y_interpolated)**2 / abs(para_y_interpolated))
+
+					chisq[i] += nansum((ortho_y_interpolated - para_y)**2 / abs(para_y))
+					#chisq[i] += nansum((ortho_y_interpolated - para_y_interpolated)**2 / self.Nsigma[good_all_levels]**2)
+					n[i] += float(len(ortho_y_interpolated))
+			h_compare.g[ortho_levels] /= op_ratios[i]
+			self.g[ortho_levels] /= op_ratios[i]
+			#print(op_ratios[i], chisq[i])
+		min_chisq = where(chisq == nanmin(chisq))
+		#std_dev = sqrt((1.0/(n[min_chisq]-1.0)) * chisq[min_chisq])
+		#print('Best fit O/P = ', op_ratios[min_chisq], '+/-', std_dev)
+		#print('Chisq test result = ', chisq[min_chisq])
+
+		# weighted_variance = (1.0 / nansum(1.0/array(ratio_variances)))
+		# weighted_mean =  nansum(array(ratios) / array(ratio_variances)) / nansum(1.0 / array(ratio_variances))
+
+
+		# print('Median O/P = ',nanmedian(ratios))
+		# print('Mean O/P = ', nanmean(ratios))
+		# print('Stddev O/P = ', nanstd(ratios))
+		# print('Weighted mean O/P = ', weighted_mean, '+/-', sqrt(weighted_variance))
+		#h_compare.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+		self.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+		return(op_ratios[min_chisq][0]) #Return best fit chisq
+	# def find_ortho_to_para_ratio(self, s2n_cut = 3.0): #Function to find the best fit ortho-to-para ratio
+
+	# 	h_compare = copy.deepcopy(self) #Find weighted mean of all column densities for a given level
+	# 	for J in range(0,50):
+	# 		for V in range(1,15): #Loop through each V ladder
+	# 			use_these = (h_compare.J.u == J) & (h_compare.V.u==V) & (h_compare.N > 0.)
+	# 			if any(use_these):
+	# 				h_compare.N[use_these] = exp(nanmean(log(h_compare.N[use_these])))
+
+
+	# 	ortho_levels = (self.J.u % 2 == 1) #Find all ortho levels
+	# 	para_levels = ~ortho_levels #Find all para levels
+	# 	base_op_ratio = 3.0 #Base OP ratio
+	# 	h_compare.g[ortho_levels] /= base_op_ratio #Remove base OP ratio before doing anything
+	# 	self.g[ortho_levels] /= base_op_ratio
+	# 	# op_ratios = arange(1.0, 4.0, 0.01)
+	# 	# n_op_ratios = len(op_ratios)
+	# 	# chisq = zeros(n_op_ratios)
+	# 	# fractional_uncertainity =  zeros(n_op_ratios)
+	# 	n = 0
+	# 	# for i in range(n_op_ratios):
+	# 		#ratios = [] #List to hold the ratios
+	# 		#ratio_variances = []
+	# 	# h_compare.g[ortho_levels] *= op_ratios[i]
+	# 	# self.g[ortho_levels] *= op_ratios[i]
+	# 	ratios = []
+	# 	for v in range(14): #Loop through all possible v levels
+	# 		good_all_levels =  (self.V.u == v) & (self.s2n >= s2n_cut) 
+	# 		good_ortho_levels = good_all_levels & ortho_levels #Find all good data points in this 
+	# 		good_para_levels = good_all_levels & para_levels #Find all good data points in this 
+
+	# 		if (sum(good_ortho_levels) > 2) and (sum(good_para_levels) > 2):
+	# 			good_all_levels_and_good_s2n = good_all_levels & (self.s2n >= s2n_cut)
+	# 			x = self.T[good_all_levels_and_good_s2n]
+	# 			ortho_x = self.T[good_ortho_levels]
+	# 			ortho_y = (self.N[good_ortho_levels] / self.g[good_ortho_levels])
+	# 			ortho_y_to_interp = (h_compare.N[good_ortho_levels] / h_compare.g[good_ortho_levels])
+	# 			ortho_y_sigma = (self.Nsigma[good_ortho_levels] / self.g[good_ortho_levels])
+	# 			para_x = self.T[good_para_levels]
+	# 			para_y = (self.N[good_para_levels] / self.g[good_para_levels])
+	# 			para_y_to_interp = (h_compare.N[good_para_levels] / h_compare.g[good_para_levels])
+	# 			para_y_sigma = (self.Nsigma[good_para_levels] / self.g[good_para_levels])
+
+	# 			order_all = x.argsort()
+	# 			order_para = para_x.argsort()
+	# 			order_ortho = ortho_x.argsort()
+	# 			x = x[order_all]
+	# 			para_x = para_x[order_para].data
+	# 			para_y = para_y[order_para].data
+	# 			para_y_to_interp = para_y_to_interp[order_para].data
+	# 			para_y_sigma = para_y_sigma[order_para].data
+	# 			ortho_x = ortho_x[order_ortho].data
+	# 			ortho_y = ortho_y[order_ortho].data
+	# 			ortho_y_to_interp = ortho_y_to_interp[order_ortho].data
+	# 			ortho_y_sigma = ortho_y_sigma[order_ortho].data
+
+	# 			ortho_interp_obj = interp1d(ortho_x, log(ortho_y_to_interp), fill_value='extrapolate')
+	# 			#ortho_y_interpolated = exp(ortho_interp_obj(x))
+	# 			ortho_y_interpolated = exp(ortho_interp_obj(para_x))
+	# 			para_interp_obj = interp1d(para_x, log(para_y_to_interp), fill_value='extrapolate')
+	# 			#para_y_interpolated = exp(para_interp_obj(x))
+	# 			para_y_interpolated = exp(para_interp_obj(ortho_x))
+				
+	# 			ratios = ratios + (ortho_y/para_y_interpolated).tolist() #+ (ortho_y_interpolated/para_y).tolist()
+	# 			#chisq[i] += nansum((ortho_y_interpolated - para_y_interpolated)**2 / abs(para_y_interpolated))
+	# 			#chisq[i] += nansum((ortho_y_interpolated - para_y_interpolated)**2 / self.Nsigma[good_all_levels]**2)
+	# 			n += float(len(ortho_y_interpolated))
+
+		
+
+
+	# 	print('Median O/P = ',nanmedian(ratios))
+	# 	print('Mean O/P = ', nanmean(ratios))
+	# 	print('Stddev O/P = ', nanstd(ratios))
+	# 	# print('Weighted mean O/P = ', weighted_mean, '+/-', sqrt(weighted_variance))
+	# 	h_compare.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+	# 	self.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
+
 
 
 
