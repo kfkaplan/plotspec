@@ -858,6 +858,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		mask_shift =  zeros(len(line_wave)) #Array to store shift (in pixels) of mask for s2n mask fitting
 		pv_data = pv.pv #Holder for flux datacube
 		pv_variance = pv.var2d #holder for variance datacube
+		dv = pv.velocity[1]-pv.velocity[0] #delta-velocity
 		#bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through, commented out for now since it doesn't seem to help with anything
 		#pv_data[bad_data] = nan
 		#pv_variance[bad_data] = nan
@@ -942,8 +943,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
 				else: #If no background region is specified by the user, use the whole field 
 					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
-				line_flux[i] = nansum(on_data) - background #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				line_sigma[i] =  nansum(on_variance)**0.5 #Store 1 sigma uncertainity for line
+				line_flux[i] = (nansum(on_data) - background)*dv #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
+				line_sigma[i] =  (nansum(on_variance)*dv)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				#print('i = ', i)
 				#print('nansum(on_data) = ', nansum(on_data))
@@ -971,8 +972,8 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
 				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
 				weighted_variance  = pv_variance[i,:,:] * shifted_weights**2 #And extract the weighted variance
-				line_flux[i] = nansum(weighted_data)#Calculate flux sum of weighted pixels
-				line_sigma[i] =  nansum(weighted_variance)**0.5 #Store 1 sigma uncertainity for line
+				line_flux[i] = nansum(weighted_data)*dv #Calculate flux sum of weighted pixels
+				line_sigma[i] =  (nansum(weighted_variance) * dv)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
 			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
@@ -1233,6 +1234,7 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 			flux = pv.flux #Holder for flux datacube
 			var = pv.var1d #holder for variance datacube
 		velocity = pv.velocity
+		dv = velocity[1]-velocity[0] #Chunk of velocity space
 		#bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through
 		#pv_data[bad_data] == nan
 		#pv_variance[bad_data] == nan
@@ -1257,8 +1259,8 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 					background_level =  nanmedian(data[off_target]) #Calculate level (per pixel) of the background level
 				else: #If no background region is specified by the user, use the whole field 
 					background_level = 0.0 #Or if you don't want to subtract the background, just make the level per pixel = 0
-				line_flux[i] = nansum(data[on_target]) - background_level * size(data[on_target]) #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
-				line_sigma[i] =   nansum(variance[on_target])**0.5 #Store 1 sigma uncertainity for line
+				line_flux[i] = (nansum(data[on_target]) - background_level * size(data[on_target]))*dv #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
+				line_sigma[i] =   (nansum(variance[on_target])*dv)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
 				if line_s2n[i] > s2n_cut: #If line is above the set S/N threshold given by s2n_cut, plot it
 					suptitle('i = ' + str(i+1) + ',    '+ line_labels[i] +'  '+str(line_wave[i])+',   Flux = ' + '%.3e' % line_flux[i] + ',   $\sigma$ = ' + '%.3e' % line_sigma[i] + ',   S/N = ' + '%.1f' % line_s2n[i] ,fontsize=10)
