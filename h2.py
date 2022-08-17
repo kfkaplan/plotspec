@@ -19,15 +19,15 @@ from numpy import random
 default_single_temp = 1500.0 #K
 default_single_temp_y_intercept = 22.0
 alpha = arange(0.0, 10.0, 0.01) #Save range of power laws to fit extinction curve [A_lambda = A_lambda0 * (lambda/lambda0)^alpha
-lambda0 = 2.12 #Wavelength in microns for normalizing the power law exctinoction curve, here it is set to the K-badn at 2.12 um
-wave_thresh = 0.05 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
+lambda0 = 2.12 #Wavelength in microns for normalizing xgthe power law exctinoction curve, here it is set to the K-badn at 2.12 um
+wave_thresh = 0.2 #Set wavelength threshold (here 0.1 um) for trying to measure extinction, we need the line pairs to be far enough apart we can get a handle on the extinction
 
 #Global variables, do not modify
 #cloudy_dir = '/Volumes/home/CLOUDY/'
 #cloudy_dir = '/Volumes/IGRINS_Data/CLOUDY/'
 #cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
-cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
-#cloudy_dir = '/Users/kkaplan1/Desktop/workathome_igrins_data/CLOUDY/'
+#cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
+cloudy_dir = '/Users/kkaplan1/Desktop/workathome_igrins_data/CLOUDY/'
 data_dir = 'data/' #Directory where H2 data is stored for cloudy
 # energy_table = data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 # transition_table = data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -589,7 +589,7 @@ def import_cloudy(model=''): #Import cloudy model from cloudy directory
 	for i in range(len(L)): #Loop through each transition
 		h.F[(h.V.u == Vhi[i]) & (h.V.l == Vlo[i]) & (h.J.u == Jhi[i]) & (h.J.l == Jlo[i])] = L[i] #Find current transition in h2 transitions object for list of H2 lines cloudy outputs and set flux to be equal to the luminosity of the line outputted by cloudy
 	h.calculate_column_density()
-	h.normalize() #Normalize to the 5-3 O(3) line
+	#h.normalize() #Normalize to the 5-3 O(3) line
 	return(h)
 
 def combine_models(model1, model2, weight1, weight2): #Combine two models scaling each by their given weights
@@ -726,13 +726,13 @@ class h2_transitions:
 		return where((self.V.l == v) & (self.J.l == J))
 	def tout(self, v, J): #FInd and return indicies of transitions out of a given level defined by v and J(self.V.u == v) & (self.J.u == J)
 		return where((self.V.u == v) & (self.J.u == J))
-	def calculate_column_density(self, normalize=True): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
+	def calculate_column_density(self, normalize=False): #Calculate the column density and uncertainity for a line's given upper state from the flux and appropriate constants
 		##self.N = self.F / (self.g * self.E.u * h * c * self.A)
 		##self.Nsigma = self.sigma /  (self.g * self.E.u * h * c * self.A)
 		#self.N = self.F / (self.g * self.E.diff() * h * c * self.A)
 		#self.Nsigma = self.sigma /  (self.g * self.E.diff() * h * c * self.A)
-		self.N = self.F / (self.E.diff() * h * c * self.A)
-		self.Nsigma = self.sigma /  (self.E.diff() * h * c * self.A)
+		self.N = 4 * pi * self.F / (self.E.diff() * h * c * self.A)
+		self.Nsigma =  4 * pi * self.sigma /  (self.E.diff() * h * c * self.A)
 		if normalize: #By default normalize to the 1-0 S(1) line, set normalize = False if using absolute flux calibrated data
 			self.normalize()
 			#N_10_S1 = self.N[self.label == '1-0 S(1)'] #Grab column density derived from 1-0 S(1) line
@@ -759,10 +759,10 @@ class h2_transitions:
 				line_profile =  beta *  exp(-((c_km_s * ((wave/current_wavelength) - 1.0)-centroid)**2/(alpha))) #Calculate gaussian line profile in wavelength space
 				flux = flux + self.F[i]*line_profile #Build up line on flux grid
 		return wave, flux #Return wavlelength and flux grids
-	def normalize(self, label='5-3 O(3)'):
+	def normalize(self, label='5-3 O(3)', value=1.):
 		i = self.label == label
 		if self.N[i] > 0.: #Check if line even exists
-			normalize_by_this = self.N[i] / self.g[i]#Grab column density of line to normalize by
+			normalize_by_this = value * self.N[i] #/ self.g[i]#Grab column density of line to normalize by
 			self.N /= normalize_by_this #Do the normalization
 			self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 		else:
@@ -1557,6 +1557,9 @@ class h2_transitions:
 				if len(waves) == 2 and abs(waves[0]-waves[1]) > wave_thresh: #If a single pair of lines from the same upper state are found, calculate observed vs. intrinsic ratio
 					pair_a.append(where(self.wave == waves[0])[0][0])
 					pair_b.append(where(self.wave == waves[1])[0][0])
+					print('Found two transitions from the same upper state to calculate extiction.')
+					print('They are ', labels)
+					print('at wavelengths ', waves)
 				elif len(waves) == 3: #If three liens are found from the same upper state, calculate differential extinction from differences between all three lines
 					#Pair 1
 					if abs(waves[0] - waves[1]) > wave_thresh:
@@ -1569,6 +1572,9 @@ class h2_transitions:
 					if abs(waves[1] - waves[2]) > wave_thresh: #check if pair of lines are far enough apart
 						pair_a.append(where(self.wave == waves[1])[0][0])
 						pair_b.append(where(self.wave == waves[2])[0][0])
+					print('Found three transitions from the same upper state to calculate extiction.')
+					print('They are ', labels)
+					print('at wavelengths ', waves)
 		pair_a = array(pair_a) #Turn lists of indicies into arrays of indicies
 		pair_b = array(pair_b)
 		chisqs = [] #Store chisq for each possible extinction and extinction law
@@ -1580,7 +1586,11 @@ class h2_transitions:
 				A_lambda = A_K * h.wave**(-a) / lambda0**(-a) #Calculate an extinction correction
 				h.F *= 10**(0.4*A_lambda) #Apply extinction correction
 				h.calculate_column_density() #Calculate column densities from each transition, given the guess at extinction correction
-				chisq = nansum((h.N[pair_a] - h.N[pair_b])**2 /  h.N[pair_b]) #Calculate chisq from all line pairs that arise from same upper states
+				# chisq = nansum((h.N[pair_a] - h.N[pair_b])**2 /  h.N[pair_b]) #Calculate chisq from all line pairs that arise from same upper states
+				# chisq = nansum((h.N[pair_a] - h.N[pair_b])**2 /  (h.N[pair_b]**2)) #Calculate chisq from all line pairs that arise from same upper states
+				ln_N_pair_a = log(h.N[pair_a])
+				ln_N_pair_b = log(h.N[pair_b])
+				chisq = nansum((ln_N_pair_a - ln_N_pair_b)**2 / ln_N_pair_b)
 				chisqs.append(chisq) #Store chisq and corrisponding variables for extinction correction
 				alphas.append(a)
 				A_Ks.append(A_K)
@@ -1590,11 +1600,12 @@ class h2_transitions:
 		best_fit = chisqs == nanmin(chisqs) #Find the minimum chisq and best fit alpha and A_K
 		best_fit_A_K = A_Ks[best_fit]
 		best_fit_alpha = alphas[best_fit]
+		print('Found ', len(pair_a), ' line pairs for calculating extinction.')
 		print('Best fit alpha =', best_fit_alpha) #Print results so user can see
 		print('Best fit A_K = ', best_fit_A_K)
 		A_lambda = best_fit_A_K * self.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
 		self.F *= 10**(0.4*A_lambda) #Apply extinction correction
-		self.calculate_column_density() #Calculate column densities from each transition, given the new extinction correction
+		self.calculate_column_density(normalize=False) #Calculate column densities from each transition, given the new extinction correction
 		self.A_K = best_fit_A_K #Store extinction paramters in case user wants to inspect or tabulate them later
 		self.alpha = best_fit_alpha
 	# def find_cascade(v_u, j_u, v_l, j_l): #Find all possible paths between two levels
@@ -1825,7 +1836,8 @@ class h2_transitions:
 		# print('Weighted mean O/P = ', weighted_mean, '+/-', sqrt(weighted_variance))
 		#h_compare.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
 		self.g[ortho_levels] *= base_op_ratio #Restore base OP ratio now that we are done
-		return(op_ratios[min_chisq][0]) #Return best fit chisq
+		self.op_ratio = op_ratios[min_chisq][0] #Save best fit O/P ratio in H2 obj
+		return(self.op_ratio) #Return best fit chisq
 	# def find_ortho_to_para_ratio(self, s2n_cut = 3.0): #Function to find the best fit ortho-to-para ratio
 
 	# 	h_compare = copy.deepcopy(self) #Find weighted mean of all column densities for a given level

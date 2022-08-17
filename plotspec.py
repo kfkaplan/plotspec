@@ -20,12 +20,20 @@ import ds9 #For scripting DS9
 import copy #Allow objects to be copied
 from scipy.ndimage.filters import median_filter #For cosmic ray removal
 from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel, interpolate_replace_nans #For smoothing, not used for now, commented out
+from astropy.stats import biweight_location
 from pdb import set_trace as stop #Use stop() for debugging
 #ion() #Turn on interactive plotting for matplotlib
 from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
 #from numba import jit #Import numba for speeding up some definitions, commented out for now since there is a major error importing numba
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
 from pylab import size #For some reason size was not working, so I will import it last
+#For creating synthetic spectra for standard stars using Phoenix model atmpsheres, Gollum, and muler
+from gollum.phoenix import PHOENIXSpectrum #Gollum: https://gollum-astro.readthedocs.io/en/latest/
+path_to_pheonix_models = '../../../phoenix_standard_star_models'
+from specutils.manipulation import LinearInterpolatedResampler
+#from astropy import units as u
+LinInterpResampler = LinearInterpolatedResampler()
+from muler.utilities import resample_list
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
@@ -37,13 +45,11 @@ import matplotlib.gridspec as grd
 #save_path = '/Volumes/home/results/'
 #pipeline_path = '/Volumes/IGRINS_Data/plp/' #Paths for running on linux laptop
 #save_path = '/Volumes/IGRINS_Data/results/'
-#pipeline_path = '/Users/kfkaplan/Desktop/tmp_igrins_data/plp/'
-#save_path = '/Users/kfkaplan/Desktop/tmp_igrins_data/results/'
 #save_path = '/home/kfkaplan/Desktop/results/'
-pipeline_path = '/Volumes/IGRINS_Data_Backup/plp/'
-save_path = '/Volumes/IGRINS_Data_Backup/results/' #Define path for saving temporary files'
-#pipeline_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/plp/'
-#save_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/results/'
+# pipeline_path = '/Volumes/IGRINS_Data_Backup/plp/'
+# save_path = '/Volumes/IGRINS_Data_Backup/results/' #Define path for saving temporary files'
+pipeline_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/plp/'
+save_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/results/'
 scratch_path = save_path + 'scratch/' #Define a scratch path for saving some temporary files
 if not os.path.exists(scratch_path): #Check if directory exists
 	print('Directory '+ scratch_path + ' does not exist.  Making new directory.')
@@ -268,6 +274,164 @@ def mask_hydrogen_lines(wave, flux):
 		return flux #If nothing is masked, return the flux unmodified
 
 
+def absolute_flux_calibration(std_date, std_frameno, sci, sci2d=None, t_std=1.0, t_obj=1.0, V=0.03, slit_length_arcsec=14.8, PA=90.0, guiding_error=1.5):
+
+
+
+	#Calculate the fraction of starlight (usually used for A0V standards for absolute flux calibration) through the IGRINS slit
+	#Based on https://github.com/kfkaplan/estimate_IGRINS_std_star_light_through_slit/blob/main/estimate_IGRINS_std_star_light_through_slit.ipynb
+	#Read in slit profile file outputted by IGRINS PLP
+
+	magnitude_scale = 10**(0.4*(0.03 - V)) #Scale flux by difference in V magnitude between standard star and Vega (V for vega = 0.03 in Simbad)
+
+	f_through_slit_H = 0.
+	f_through_slit_K = 0.
+
+	for band in ['H', 'K']:
+		json_file = open(data_path+str(std_date)+'/SDC'+band+'_'+str(std_date)+'_'+'%.4d' % int(std_frameno)+'.slit_profile.json')
+		json_obj = json.load(json_file)
+		x = array(json_obj['profile_x']) * slit_length_arcsec
+		y = array(json_obj['profile_y'])
+		#Fit 2 Moffat distributions to the psfs from A and B positions (see https://docs.astropy.org/en/stable/modeling/compound-models.html)
+		g1 = models.Moffat1D(amplitude=0.5, x_0=4.0, alpha=1.0, gamma=1.0)
+		g2 = models.Moffat1D(amplitude=-0.5, x_0=11.0, alpha=1.0, gamma=1.0)
+		gg_init = g1 + g2
+		fitter = fitting.SLSQPLSQFitter()
+		gg_fit = fitter(gg_init, x, y)
+		print('FWHM A beam:', gg_fit[0].fwhm)
+		print('FWHM B beam:', gg_fit[1].fwhm)
+
+		#breakpoint()
+
+		#Numerically estimate light through slit
+		g1_fit = models.Moffat2D(amplitude=abs(gg_fit[0].amplitude) , x_0=gg_fit[0].x_0 - 0.5*slit_length_arcsec, alpha=gg_fit[0].alpha, gamma=gg_fit[0].gamma)
+		g2_fit = models.Moffat2D(amplitude=abs(gg_fit[1].amplitude), x_0=gg_fit[1].x_0 - 0.5*slit_length_arcsec, alpha=gg_fit[1].alpha, gamma=gg_fit[1].gamma)
+		
+
+
+
+
+		#Generate a 2D grid in x and y for numerically calculating slit loss
+		n_axis = 10000
+		half_n_axis = n_axis / 2
+		dx = 1.2 * (slit_length / n_axis)
+		dy = 1.2 * (slit_length / n_axis)
+		y2d, x2d = meshgrid(arange(n_axis), arange(n_axis))
+		x2d = (x2d - half_n_axis) * dx
+		y2d = (y2d - half_n_axis) * dy
+		#Perform numerical integration for total flux ignoring slit losses
+
+		#Test simulating guiding error
+		position_angle_in_radians = PA * (pi)/180.0 #PA in radians
+		fraction_guiding_error = cos(position_angle_in_radians)*guiding_error #arcsec, estimated by doubling average fwhm of moffet functions
+		diff_x0 = fraction_guiding_error * cos(position_angle_in_radians)
+		diff_y0 = fraction_guiding_error * sin(position_angle_in_radians)
+
+
+		g1_fit.x_0 += 0.5*diff_x0
+		g2_fit.x_0 += 0.5*diff_x0
+		g1_fit.y_0 += 0.5*diff_y0
+		g2_fit.y_0 += 0.5*diff_y0
+
+		profiles_2d = zeros(shape(x2d))
+
+		n = 5
+		for i in range(n):
+		    profiles_2d += (1/n)*(g1_fit(x2d, y2d) + g2_fit(x2d, y2d))
+		    g1_fit.x_0 -= (1/(n-1))*diff_x0
+		    g2_fit.x_0 -= (1/(n-1))*diff_x0
+		    g1_fit.y_0 -= (1/(n-1))*diff_y0
+		    g2_fit.y_0 -= (1/(n-1))*diff_y0
+
+
+
+
+
+		profiles_2d = profiles_2d / nansum(profiles_2d) #Normalize each pixel by fraction of starlight and area in sterradians per pixel
+
+		slit_width_to_length_ratio = 1.0/14.8
+		slit_width_arcsec = slit_length_arcsec * slit_width_to_length_ratio
+		outside_slit = (y2d <= -0.5*slit_width_arcsec) | (y2d >= 0.5*slit_width_arcsec) | (x2d <= -0.5*slit_length_arcsec) | (x2d >= 0.5*slit_length_arcsec)
+		profiles_2d[outside_slit] = nan
+		f_through_slit = nansum(profiles_2d)
+
+		if (band == 'H'):
+			f_through_slit_H = f_through_slit
+		elif (band == 'K'):
+			f_through_slit_K = f_through_slit
+		
+		# flux_total = nansum(profiles_2d) * dx * dy
+		# profiles_2d = profiles_2d / flux_total #Normalize
+		#Perform numerical integration for flux through slit by masking out pixels outside of the slit
+
+		#area_flat_2d = ones(shape(profiles_2d)) * (slit_length_arcsec * slit_width_arcsec) / size(profiles_2d) #Area per pixel in arcsec^-2
+
+
+		
+		# slit_area = (slit_length_arcsec * slit_width_arcsec)
+		# area_profiles = slit_area / nansum(profiles_2d) #Calculate area on sky through slit covered by Std Star PSF in arcsec^2, later used for calibration
+		# area_per_pixel =  slit_area / 100 * (100 * slit_width_to_length_ratio)
+
+		#f_through_slit = nansum(profiles_2d) * dx * dy
+		#f_through_slit = flux_inside_slit / flux_total
+
+		#breakpoint()
+		#ster_per_slit = (slit_wid) / 4.25e10 #Sterradians covered by the IGRINS slit.
+		#pixels_per_slit = 100 * (100 * slit_width_to_length_ratio)
+		# arcsec_squared_per_pixel = (slit_length_arcsec * slit_width_arcsec) / (100.0 * (100 * slit_width_to_length_ratio))
+		# ster_per_pixel = arcsec_squared_per_pixel / 4.25e10 #Sterradians per pixel
+		# w = (100 * slit_width_to_length_ratio) #Pixels per slit
+
+		#breakpoint()
+		# combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+		#combined_abs_flux_scale = magnitude_scale * (t_std/t_obj) * (area_profiles/area_per_pixel) #Related to eqn. 10 in Lee & Pak (2006)
+		# combined_abs_flux_scale = magnitude_scale * f_through_slit * (t_std/t_obj) * (1.0 / pixels_per_slit) #Related to eqn. 10 in Lee & Pak (2006)
+
+
+
+
+
+
+		# #Apply absolute flux calibration to each order seperately
+		# for order in sci.orders:
+		# 	if  (band == 'H' and order.wave[0] < 1.85) or (band == 'K' and order.wave[0] >= 1.85):
+		# 		order.flux *= combined_abs_flux_scale
+		# 		order.noise *= combined_abs_flux_scale
+		# if sci2d is not None:
+		# 	for order in sci2d.orders:
+		# 		if (band == 'H' and order.wave[0] < 1.85) or (band == 'K' and order.wave[0] >= 1.85):
+		# 			order.flux *= combined_abs_flux_scale
+		# 			order.noise *= combined_abs_flux_scale
+
+		# print('Band', band)
+		# print('combined_abs_flux_scale', combined_abs_flux_scale)
+		# print('f_through_slit', f_through_slit)
+
+
+
+	#Fit linear trend through slit throughput as function of wavelength and using fitting a line through two points
+	m = (f_through_slit_K - f_through_slit_H) / ((1/2.2) - (1/1.65))
+	b = f_through_slit_H - m*(1/1.65)
+	print('f_through_slit_K', f_through_slit_K)
+	print('f_through_slit_H', f_through_slit_H)
+	print('m', m)
+	print('b', b)
+	# print('combined_abs_flux_scale', combined_abs_flux_scale)
+	# print('f_through_slit', f_through_slit)
+
+
+	# combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+	for order in sci.orders:
+		f_through_slit = m*(1/order.wave) + b
+		combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+		order.flux *= combined_abs_flux_scale
+		order.noise *= combined_abs_flux_scale
+	if sci2d is not None:
+		for order in sci2d.orders:
+			f_through_slit = m*(1/order.wave) + b
+			combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+			order.flux *= combined_abs_flux_scale
+			order.noise *= combined_abs_flux_scale
 
 
 #Function normalizes A0V standard star spectrum, for later telluric correction, or relative flux calibration
@@ -276,7 +440,9 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 	std.combine_orders() #Combine orders for standard star specturm for later plotting
 	vega_file = pipeline_path + 'master_calib/A0V/vegallpr25.50000resam5' #Directory storing Vega standard spectrum     #Set up reading in Vega spectrum
 	vega_wave, vega_flux, vega_cont = loadtxt(vega_file, unpack=True) #Read in Vega spectrum
+
 	vega_wave = (vega_wave / 1e3)*(1.0 + std_shift/c) #convert angstroms to microns and shift wavelengths if a velocity correction is given by the user
+	vega_flux = vega_flux * 1e3 #Convert per nm to per um for the flux
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
 	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega, taken between H I lines in the model spectrum vegallpr25.50000resam5
@@ -416,6 +582,7 @@ class position_velocity:
 		var1d = empty([n_lines, n_velocity])
 		pv = empty([n_lines, slit_pixel_length, n_velocity])
 		var2d =  empty([n_lines, slit_pixel_length, n_velocity])
+		pixels_per_sterradian = slit_pixel_length*len(interp_velocity) / (4*pi)
 		if shift_lines != '': #If user wants to apply a correction in velocity space to a set of lines, use this file shift_lines
 			shift_labels = loadtxt(shift_lines, usecols=[0,], dtype=str, delimiter='\t') #Load line labels to ID each line
 			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
@@ -444,17 +611,20 @@ class position_velocity:
 			gridded_wavelengths = interp_wave(interp_velocity) #Get wavelengths as they appear on the velocity grid
 			dl_dv = (gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1]) / velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
 			dl_dv = hstack([dl_dv, dl_dv[len(dl_dv)-1]]) #Add an extra thing at the end of the delta-lambda/delta-velocity array so that it has an equal number of elements as everything else here
-			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
-			gridded_variance_2d = interp_variance_2d(interp_velocity) * dl_dv**2 #PV diagram variance velocity gridded
+			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv / pixels_per_sterradian #PV diagram velocity gridded	
+			gridded_variance_2d = interp_variance_2d(interp_velocity) * (dl_dv / pixels_per_sterradian)**2 #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
-				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv
-				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * dl_dv**2
+				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv / pixels_per_sterradian
+				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * (dl_dv / pixels_per_sterradian)**2
 			elif make_1d_y_range[1] > 0: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
-				gridded_flux_1d = nansum(gridded_flux_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
-				gridded_variance_1d = nansum(gridded_variance_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv**2 #Create 1D variance spectrum by collapsing 2D variance
+				gridded_flux_1d = nansum(gridded_flux_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv / pixels_per_sterradian #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * (dl_dv / pixels_per_sterradian)**2 #Create 1D variance spectrum by collapsing 2D variance
 			else:
-				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
-				gridded_variance_1d = nansum(gridded_variance_2d, 0) * dl_dv**2 #Create 1D variance spectrum by collapsing 2D variance
+				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv / pixels_per_sterradian #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d, 0) * (dl_dv / pixels_per_sterradian)**2 #Create 1D variance spectrum by collapsing 2D variance
+			badpix = (gridded_flux_1d==0.0) | (gridded_variance_1d==0.0)#nan out zeros
+			gridded_flux_1d[badpix] = nan
+			gridded_variance_1d[badpix] = nan
 			flux[i,:] = gridded_flux_1d# *  scale_flux_1d #Append 1D flux array with line
 			var1d[i,:] = gridded_variance_1d# * scale_flux_1d #Append 1D variacne array with line
 			pv[i,:,:] = gridded_flux_2d# * scale_flux_2d #Stack PV spectrum of lines into a datacube
@@ -777,7 +947,7 @@ class position_velocity:
 			attribute = []
 			for i in range(self.n_lines):
 				if any(filter in self.label[i]):
-					attribute.append(getattr(self.model_fits[i], attribute_str))
+					attribute.append(getattr(self.model_fits[i], attribute_str).value)
 			return_this.append(attribute)
 		return return_this
 	def get_median_fitmodel_attribute(self, attribute_strs, filter=''):
@@ -832,7 +1002,7 @@ def fit_weights(weights, data, variance, pixel_range=[-10,10]): #Find optimal po
 		sigma = nansum(variance*shifted_weights**2)**0.5  #Calculate weighted sigma
 		#flux = nansum((median_smoothed_data-background)*shifted_weights) #Calcualte weighted flux
 		#sigma = sqrt( nansum(median_smoothed_variance*shifted_weights**2) ) #Calculate weighted sigma
-		if flux == 0.: #Divide by zero error catch
+		if flux == 0. or sigma == 0.: #Divide by zero error catch
 			s2n[i] == 0.
 		else:
 			s2n[i] = flux / sigma
@@ -859,6 +1029,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 		pv_data = pv.pv #Holder for flux datacube
 		pv_variance = pv.var2d #holder for variance datacube
 		dv = pv.velocity[1]-pv.velocity[0] #delta-velocity
+
+		print('dv = ', dv)
+
 		#bad_data = pv_data < -10000.0  #Mask out bad pixels and cosmic rays that somehow made it through, commented out for now since it doesn't seem to help with anything
 		#pv_data[bad_data] = nan
 		#pv_variance[bad_data] = nan
@@ -883,7 +1056,6 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 			signal = median_filter(signal, size=[5,5]) #Median filter signal before calculating weights to get rid of noise spikes, cosmics rays, etc.
 			signal[signal < nanmax(signal) * weight_threshold] = 0. #Zero out pxiels below the background threshold scale
 			weights = signal**2.0 #Grab signal of line to weight by, this signal is what will be used for the optimal extraction
-			#weights = abs(signal)
 			weights = weights / nansum(weights) #Normalize weights
 			#weights[weights < weight_threshold]
 		elif s2n_mask == 0.0: #If user specifies to use a region
@@ -932,6 +1104,9 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				shift_weight_pixels = fit_weights(weights, pv_data[i,:,:], pv_variance[i,:,:], pixel_range=pixel_range)
 				mask_shift[i] = shift_weight_pixels
 				shifted_weights = roll(weights, shift_weight_pixels, 1) #Set mask to be shifted to maximize S/N
+
+				#print('SUM SHIFTED WEIGHTS = ', nansum(shifted_weights))
+
 				rolled_weights[i,:,:] = shifted_weights  #store shifted weights for later plotting the contours of
 			else:
 				use_mask = on_mask
@@ -941,8 +1116,10 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				if use_background_region: #If a backgorund region is specified
 					off_data = pv_data[i,:,:][~use_mask] #Find data in the background region for calculating the background
 					background = nanmedian(off_data) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
+					#background = biweight_location(off_data, ignore_nan=True) * size(on_data) #Calculate backgorund from median of data in region and multiply by area of region used for summing flux
 				else: #If no background region is specified by the user, use the whole field 
 					background = nanmedian(pv_data[i,:,:]) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
+					#background = biweight_location(pv_data[i,:,:], ignore_nan=True) * size(on_data) #Get background from median of all data in field and multiply by area of region used for summing flux
 				line_flux[i] = (nansum(on_data) - background)*dv #Calculate flux from sum of pixels in region minus the background (which is the median of some region or the whole field, multiplied by the area of the flux region)
 				line_sigma[i] =  (nansum(on_variance)*dv)**0.5 #Store 1 sigma uncertainity for line
 				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
@@ -951,30 +1128,41 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 				#print('background = ', background)
 			elif optimal_extraction: #Okay if the user specifies to use optimal extraction now that we know how the weights have been shifted to maximize S/N
 				### Horne 1986 optimal extraction method, tests show it doesn't work so well as the weighting scheme below so it's commented out, left here if I wever want to revivie it
-				# p = sqrt(shifted_weights)
-				# p = p - nanmedian(p)
-				# p[p < 0.] = 0.
-				# p = p / nansum(p)
-				# v = pv_variance[i,:,:]
-				# f = pv_data[i,:,:]
-				# s = nanmedian(f[p == 0.0])
-				# m = ones(pv_shape) 
-				# #sigma_ _bad_pix = (f - s - nansum(f-s)*p)**2 > 10.0**2 * v
-				# #m[sigma_clip_bad_pix] = 0.
-				# p_squared_divided_by_v = nansum(m * p**2 / v)
-				# try:
-				# 	line_flux[i] = nansum((m * p * (f-s)) / v) / p_squared_divided_by_v
-				# 	line_sigma[i] = sqrt( nansum((m*p)) / p_squared_divided_by_v  )
-				# except:
-				# 	line_flux[i] = nan
-				# 	line_sigma[i] = nan
-				### Current version of the extraction, appears to work best
-				background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
-				weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
-				weighted_variance  = pv_variance[i,:,:] * shifted_weights**2 #And extract the weighted variance
-				line_flux[i] = nansum(weighted_data)*dv #Calculate flux sum of weighted pixels
-				line_sigma[i] =  (nansum(weighted_variance) * dv)**0.5 #Store 1 sigma uncertainity for line
-				line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+				p = (shifted_weights)**0.5
+				p = p - nanmedian(p)
+				p[p < 0.] = 0.
+				p = p / nansum(p)
+				v = pv_variance[i,:,:]
+				f = pv_data[i,:,:]
+				s = nanmedian(f[p == 0.0])
+				m = ones(pv_shape) 
+				sigma_clip = 7.5
+				sigma_clip_bad_pix = (f - s - nansum(f-s)*p)**2 > sigma_clip**2 * v
+				m[sigma_clip_bad_pix] = 0.
+				p_squared_divided_by_v = nansum(m * p**2 / v)
+				try:
+					line_flux[i] = nansum((m * p * (f-s)) / v) / p_squared_divided_by_v
+					line_sigma[i] = sqrt( nansum((m*p)) / p_squared_divided_by_v  )
+				except:
+					line_flux[i] = nan
+					line_sigma[i] = nan
+				# ### Current version of the extraction, appears to work best
+				# background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold
+				# weighted_data =  (pv_data[i,:,:]-background) * shifted_weights #Extract the weighted data, while subtracting the background from each pixel
+				# weighted_variance  = pv_variance[i,:,:] * shifted_weights**2 #And extract the weighted variance
+				# line_flux[i] = nansum(weighted_data)*dv #Calculate flux sum of weighted pixels
+				# line_sigma[i] =  (nansum(weighted_variance) * dv)**0.5 #Store 1 sigma uncertainity for line
+				# line_s2n[i] = line_flux[i] / line_sigma[i] #Calculate the S/N in the region of the line
+				# New version of "optimal extraction" to use chisq minimization
+				# background = nanmedian(pv_data[i,:,:][shifted_weights == 0.0])  #Find background from all pixels below the background thereshold			
+				# p = copy.deepcopy(shifted_weights**0.5)
+				# use_pix = shifted_weights != 0.0
+				# p[shifted_weights == 0.0] = 0.0
+				# mean_flux = nansum(p * (pv_data[i,:,:] - background) * dv) #/ nansum(p)
+				# mean_sigma = nansum(p**2 * pv_variance[i,:,:] * dv**2)**0.5 #/ nansum(p**2))**0.5
+				# line_flux[i] = mean_flux
+				# line_sigma[i] = mean_sigma
+				# line_s2n[i] = mean_flux / mean_sigma
 		if savepdf:  #If user specifies to save a PDF of the PV diagram + flux results
 			with PdfPages(save.path + name + '.pdf') as pdf: #Make a multipage pdf
 				figure(figsize=[11.0,8.5])
@@ -1034,6 +1222,7 @@ class region: #Class for reading in a DS9 region file, and applying it to a posi
 						#ax = subplot(212) #Turn on "ax", set first subplot
 						ax = subplot(gs[1])
 						pv.plot_1d_velocity(i, clear=False, fontsize=10) #Test plotting 1D spectrum below 2D spectrum
+						# print('SAVING PLOT OF ', line_labels[i])
 						pdf.savefig() #Add figure as a page in the pdf
 			#figure(figsize=(11, 8.5), frameon=False) #Reset figure size
 		if systematic_uncertainity > 0.: #If user specifies some fractional systematic uncertainity
@@ -1301,7 +1490,8 @@ class extract: #Class for extracting fluxes in 1D from a position_velocity objec
 #The idea is that the user can call a single line and get a single spectrum ready to go
 def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std_flexure=0., B=0.0, V=0.0, y_scale=1.0, wave_smooth=0.0, y_power=1.0, y_sharpen=0.0,
 		twodim=True, usestd=True, no_flux=False, make_1d=False, median_1d=False, tellurics=False, savechecks=True, mask_cosmics=False,
-		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False, std_shift=0.0):
+		telluric_power=1.0, telluric_spectrum=[], calibration=[], telluric_quality_cut=False, interpolate_slit=False, std_shift=0.0,
+		phoenix_model=''):
 	if usestd or tellurics:
 		#Make 1D spectrum object for standard star
 		H_std_obj = makespec(date, 'H', waveno, stdno) #Read in H-band
@@ -1460,11 +1650,17 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std
 	if tellurics: #If user specifies "tellurics", return only flattened standard star spectrum
 		return stdflat_obj
 	elif usestd: #If user wants to use standard star (True by default)
-		spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks,
-			telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #For 1D spectrum
-		if twodim: #If user specifies this object has a 2D spectrum
-			spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks, 
-				telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #Run for 2D spectrum
+		if phoenix_model == '': #If using the old standard star correction...
+			spec1d = telluric_and_flux_calib(sci1d_obj, std_obj, stdflat_obj, B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks,
+				telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #For 1D spectrum
+			if twodim: #If user specifies this object has a 2D spectrum
+				spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks, 
+					telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #Run for 2D spectrum
+		else: #Else if using the new Pheonix stellar models for standard star correction...			
+			print('YOU HAVE SPECIFIED YOU WANT TO USE THE PHEONIX STELLAR MODEL'+phoenix_model)
+			spec1d = process_standard_star_with_phoenix_model(sci1d_obj, std_obj, phoenix_model, rv_shift=std_shift)
+			if twodim: #If user specifies this object has a 2D spectrum
+				spec2d  = process_standard_star_with_phoenix_model(sci2d_obj, std_obj, phoenix_model, rv_shift=std_shift)
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
@@ -1604,6 +1800,8 @@ class spec1d:
 	# 						if trace == nan: trace = 0.
 	# 						flux[i] -= trace
 	# 			order.flux = flux	
+	# def to_muler_list(self): #Generate a muler l
+	# 	#STUFF
 	def subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
 		if size != 0:
 			sizes = [size]
@@ -2628,3 +2826,26 @@ class find_lines:
 		print('Median line profile FWHM: ', g_fwhm)
 		return(g(self.velocity)) #Return gaussian fit
 
+
+#Generate a synthetic stellar spectrum  for standard stars using Phoenix stellar atmosphere models, gollum, and muler
+def process_standard_star_with_phoenix_model(sci, std, std_star_name, rv_shift=0.0):
+	#STUFF
+	min_wavelength = 14000 #Get min wavelength in spectrum
+	max_wavelength = 26000 #Get max wavelength in spectrum
+	resolving_power = 45000.0 #IGRINS resolution
+
+	if std_star_name == '18Lep':
+		#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
+		fraction_a = 0.5
+		native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0)
+		native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, metallicity=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)
+		breakpoint()
+	else: # the underscore character is used as a catch-all.
+		raise Exception('The standard star name '+std_star_name+' does not match known standard stars.')
+
+
+	std_model_synthetic_spectrum = resample_list(native_resolution_template_a, std.orders) + resample_list(native_resolution_template_b, std.orders)*(1.0-fraction_a)
