@@ -18,9 +18,10 @@ from scipy.interpolate import interp1d, UnivariateSpline, griddata #For interpol
 import ds9 #For scripting DS9
 #import h2 #For dealing with H2 spectra
 import copy #Allow objects to be copied
-from scipy.ndimage.filters import median_filter #For cosmic ray removal
+from scipy.ndimage import median_filter #For cosmic ray removal
 from astropy.convolution import convolve, Gaussian1DKernel, Gaussian2DKernel, interpolate_replace_nans #For smoothing, not used for now, commented out
 from astropy.stats import biweight_location
+from astropy.nddata import StdDevUncertainty
 from pdb import set_trace as stop #Use stop() for debugging
 #ion() #Turn on interactive plotting for matplotlib
 from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
@@ -28,17 +29,23 @@ from matplotlib.colors import LogNorm #For plotting PV diagrams with imshow
 from matplotlib.backends.backend_pdf import PdfPages  #For outputting a pdf with multiple pages (or one page)
 from pylab import size #For some reason size was not working, so I will import it last
 #For creating synthetic spectra for standard stars using Phoenix model atmpsheres, Gollum, and muler
-from gollum.phoenix import PHOENIXSpectrum #Gollum: https://gollum-astro.readthedocs.io/en/latest/
-path_to_pheonix_models = '../../../phoenix_standard_star_models'
-from specutils.manipulation import LinearInterpolatedResampler
-#from astropy import units as u
-LinInterpResampler = LinearInterpolatedResampler()
-from muler.utilities import resample_list
+from astropy import units as u
+from dust_extinction.averages import GCC09_MWAvg #Dust_extinction: https://dust-extinction.readthedocs.io/en/latest/index.html#
+import matplotlib.gridspec as grd
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
 except ImportError:
 	print("Bottleneck library not installed.  Code will still run but might be slower.  You can try to bottleneck with 'pip install bottleneck' or 'sudo port install bottleneck' for a speed up.")
-import matplotlib.gridspec as grd
+try:
+	from gollum.phoenix import PHOENIXSpectrum #Gollum: https://gollum-astro.readthedocs.io/en/latest/
+	from specutils.manipulation import LinearInterpolatedResampler #Specutils: https://specutils.readthedocs.io/en/stable/
+	LinInterpResampler = LinearInterpolatedResampler()
+	from muler.utilities import resample_list #Muler:
+	from muler.echelle import EchelleSpectrum, EchelleSpectrumList
+except:
+	print('Specutils, muler, and/or gollum not installed.  Legacy code should still run but PHEONIX stellar model atmospheres or absolute flux calibration will not be useable.  Please raise a github issue if you need help with this.')
+
+
 
 #Global variables user should set
 #pipeline_path = '/Volumes/home/plp/'
@@ -50,6 +57,7 @@ import matplotlib.gridspec as grd
 # save_path = '/Volumes/IGRINS_Data_Backup/results/' #Define path for saving temporary files'
 pipeline_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/plp/'
 save_path = '/Users/kkaplan1/Desktop/workathome_igrins_data/results/'
+path_to_pheonix_models = '../../../phoenix_standard_star_models'
 scratch_path = save_path + 'scratch/' #Define a scratch path for saving some temporary files
 if not os.path.exists(scratch_path): #Check if directory exists
 	print('Directory '+ scratch_path + ' does not exist.  Making new directory.')
@@ -72,8 +80,11 @@ OH_line_list = 'OH_Rousselot_2000.dat' #Read in OH line list
 c = 2.99792458e5 #Speed of light in km/s
 half_block = block / 2 #Half of the block used for running median smoothing
 #slit_length = slit_length - 1 #This is necessary to get the proper indexing
-
-
+# vega_radius = 1.8019e+11 #cm. average of polar and equitorial radii from Yoon et al. (2010) Table 1 column 2
+# vega_distance = 2.36940603e+19 #cm, based on parallax from Leeuwen (2007) which is an updated Hipparcos catalog
+# vega_R_over_D_squared = (vega_radius/vega_distance)**2 #(Radius/Distance)^2, used for magnitude estimates from synthetic standard star spectra and absolute flux calibration
+vega_V_flambdla_zero_point = 363.1e-7 #Vega flux zero point for V band from Bessell et al. (1998) in erg cm^2 s^-1 um^-1
+V_band_effective_lambda = 0.545 #Effective central wavelength for V band in microns
 
 #Definition takes a high resolution spectrum and rebins it (via interpolation and integration) onto a smaller grid
 #while conserving flux, based on Chad Bender's idea for "srebin"
@@ -378,9 +389,9 @@ def absolute_flux_calibration(std_date, std_frameno, sci, sci2d=None, t_std=1.0,
 		#breakpoint()
 		#ster_per_slit = (slit_wid) / 4.25e10 #Sterradians covered by the IGRINS slit.
 		#pixels_per_slit = 100 * (100 * slit_width_to_length_ratio)
-		# arcsec_squared_per_pixel = (slit_length_arcsec * slit_width_arcsec) / (100.0 * (100 * slit_width_to_length_ratio))
-		# ster_per_pixel = arcsec_squared_per_pixel / 4.25e10 #Sterradians per pixel
-		# w = (100 * slit_width_to_length_ratio) #Pixels per slit
+		arcsec_squared_per_pixel = (slit_length_arcsec * slit_width_arcsec) / (100.0 * (100 * slit_width_to_length_ratio))
+		ster_per_pixel = arcsec_squared_per_pixel / 4.25e10 #Sterradians per pixel
+		w = (100 * slit_width_to_length_ratio) #Pixels per slit
 
 		#breakpoint()
 		# combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
@@ -418,18 +429,16 @@ def absolute_flux_calibration(std_date, std_frameno, sci, sci2d=None, t_std=1.0,
 	print('b', b)
 	# print('combined_abs_flux_scale', combined_abs_flux_scale)
 	# print('f_through_slit', f_through_slit)
-
-
 	# combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
 	for order in sci.orders:
 		f_through_slit = m*(1/order.wave) + b
-		combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+		combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1.0/(ster_per_pixel * w * 100)) #* (ster_per_pixel / w)
 		order.flux *= combined_abs_flux_scale
 		order.noise *= combined_abs_flux_scale
 	if sci2d is not None:
 		for order in sci2d.orders:
 			f_through_slit = m*(1/order.wave) + b
-			combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1/100.0) #* (ster_per_pixel / w)
+			combined_abs_flux_scale = magnitude_scale * (t_std / t_obj) * f_through_slit * (1.0/(ster_per_pixel * w * 100)) #* (ster_per_pixel / w)
 			order.flux *= combined_abs_flux_scale
 			order.noise *= combined_abs_flux_scale
 
@@ -443,12 +452,26 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 
 	vega_wave = (vega_wave / 1e3)*(1.0 + std_shift/c) #convert angstroms to microns and shift wavelengths if a velocity correction is given by the user
 	vega_flux = vega_flux * 1e3 #Convert per nm to per um for the flux
+	vega_cont = vega_cont * 1e3
+
+	interp_vega_flux = interp1d(vega_wave, vega_flux)
+	scale_vega_flux = vega_V_flambdla_zero_point / interp_vega_flux(V_band_effective_lambda)
+	print('venga zero point divided by model venga flux (scale_vega_flux) = ',scale_vega_flux)
+	#breakpoint()
+	############scale_vega_flux = 1.0 #Used only for testing
+	vega_flux *= scale_vega_flux #Scale vega flux to match V band zero point
+	vega_cont *= scale_vega_flux
+
 	waves = arange(1.4, 2.5, 0.000005) #Array to store HI lines
 	HI_line_profiles = ones(len(waves)) #Array to store synthetic (ie. scaled vega) H I lines
-	x = [1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5] #Coordinates tracing continuum of Vega, taken between H I lines in the model spectrum vegallpr25.50000resam5
-	y = [2493670., 1950210., 1584670., 1512410., 1406170. , 1293900., 854857., 706839., 589023., 494054., 417965., 356822., 306391.]
+	x = array([1.4, 1.5, 1.6, 1.62487, 1.66142, 1.7, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5]) #Coordinates tracing continuum of Vega, taken between H I lines in the model spectrum vegallpr25.50000resam5
+	y = array([2493670., 1950210., 1584670., 1512410., 1406170. , 1293900., 854857., 706839., 589023., 494054., 417965., 356822., 306391.]) * scale_vega_flux * 1e3
 	interpolate_vega_continuum = interp1d(x, y, kind='cubic', bounds_error=False) #Create interpolation object for Vega continuum defined by coordinates above
 	interpolated_vega_continuum = interpolate_vega_continuum(waves) #grab interpolated continuum once so dn't have to interpolate it again
+	
+	#scale_vega_continuum = vega_V_flambdla_zero_point/interpolate_vega_continuum(V_band_effective_lambda)#Scale continuum estimate to match V band zero point
+	#interpolated_vega_continuum *= scale_vega_continuum
+
 	continuum_normalized_vega_flux = vega_flux / interpolate_vega_continuum(vega_wave) #Normalzie synthetic Vega spectrum by its own continuum
 	#interpolate_regular_vega_spectrum = interp1d(vega_wave, 1.0 +  (continuum_normalized_vega_flux-1.0),  bounds_error=False) #Divide out continnum and interpolate H I lines, allowing for the H I lines to scale by y_scale
 	if size(y_scale) == 2 or size(y_power) == 2 or size(y_sharpen) == 2 or size(wave_smooth) == 2: #if there are two sets of inputs for modifying the H I lines in the synthetic Vega spectrum, run twice and average the two together
@@ -563,6 +586,30 @@ def telluric_and_flux_calib(sci, std, std_flattened, calibration=[], B=0.0, V=0.
 		if not no_flux: #As long as user does not specify doing a flux calibration
 			sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
 		sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+	
+
+
+
+	#Print estimated J,H,K magnitudes as a sanity check to compare to 2MASS
+	bands = ['J', 'H', 'Ks']
+	f0_lambda = array([3.129e-13, 1.133e-13, 4.283e-14]) * 1e7  #Convert units to from W cm^-2 um^-1 to erg s^-1 cm^-2 um^-1
+	x = arange(1.0, 3.0, 1e-6)
+	delta_lambda = abs(x[1]-x[0])
+	magnitude_scale = 10**(0.4*(0.03 - V)) #Scale flux by difference in V magnitude between standard star and Vega (V for vega = 0.03 in Simbad)
+	resampled_synthetic_spectrum =  a0v_synth_spec(x) * magnitude_scale #* 4 * pi * vega_R_over_D_squared
+	for i in range(len(bands)):
+		tcurve_wave, tcurve_trans = loadtxt(path_to_pheonix_models + '/2MASS_transmission_curves/'+bands[i]+'.dat', unpack=True) #Read in 2MASS band filter transmission curve
+		#tcurve_trans[tcurve_trans < 0] = 0.0 #Zero out negative values
+		tcurve_interp = interp1d(tcurve_wave, tcurve_trans, kind='cubic', fill_value=0.0, bounds_error=False) #Create interp obj for the transmission curve
+		tcurve_resampled =  tcurve_interp(x)
+		f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
+		magnitude = -2.5 * log10(f_lambda / f0_lambda[i])# - (0.03 - V)
+		print('For band '+bands[i]+' the estimated magnitude is '+str(magnitude))
+
+
+
+
+
 	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected
 
 
@@ -582,7 +629,6 @@ class position_velocity:
 		var1d = empty([n_lines, n_velocity])
 		pv = empty([n_lines, slit_pixel_length, n_velocity])
 		var2d =  empty([n_lines, slit_pixel_length, n_velocity])
-		pixels_per_sterradian = slit_pixel_length*len(interp_velocity) / (4*pi)
 		if shift_lines != '': #If user wants to apply a correction in velocity space to a set of lines, use this file shift_lines
 			shift_labels = loadtxt(shift_lines, usecols=[0,], dtype=str, delimiter='\t') #Load line labels to ID each line
 			shift_v = loadtxt(shift_lines, usecols=[1,], dtype=float, delimiter='\t') #Load km/s to artifically doppler shift spectral lines
@@ -611,17 +657,18 @@ class position_velocity:
 			gridded_wavelengths = interp_wave(interp_velocity) #Get wavelengths as they appear on the velocity grid
 			dl_dv = (gridded_wavelengths[1:] - gridded_wavelengths[:len(gridded_wavelengths)-1]) / velocity_res #Calculate scale factor delta-lambda/delta-velocity for conserving flux when interpolating from the wavleength grid to velocity grid
 			dl_dv = hstack([dl_dv, dl_dv[len(dl_dv)-1]]) #Add an extra thing at the end of the delta-lambda/delta-velocity array so that it has an equal number of elements as everything else here
-			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv / pixels_per_sterradian #PV diagram velocity gridded	
-			gridded_variance_2d = interp_variance_2d(interp_velocity) * (dl_dv / pixels_per_sterradian)**2 #PV diagram variance velocity gridded
+			
+			gridded_flux_2d = interp_flux_2d(interp_velocity) * dl_dv #PV diagram velocity gridded	
+			gridded_variance_2d = interp_variance_2d(interp_velocity) * (dl_dv)**2 #PV diagram variance velocity gridded
 			if not make_1d: #By default use the 1D spectrum outputted by the pipeline, but....
-				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv / pixels_per_sterradian
-				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * (dl_dv / pixels_per_sterradian)**2
+				gridded_flux_1d = interp(interp_velocity, ungridded_velocities, ungridded_flux_1d) * dl_dv
+				gridded_variance_1d =  interp(interp_velocity, ungridded_velocities, ungridded_variance_1d) * (dl_dv)**2
 			elif make_1d_y_range[1] > 0: #... if user sets make_1d = True, then we will create our own 1D spectrum by collapsing the 2D spectrum
-				gridded_flux_1d = nansum(gridded_flux_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv / pixels_per_sterradian #Create 1D spectrum by collapsing 2D spectrum
-				gridded_variance_1d = nansum(gridded_variance_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * (dl_dv / pixels_per_sterradian)**2 #Create 1D variance spectrum by collapsing 2D variance
+				gridded_flux_1d = nansum(gridded_flux_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d[make_1d_y_range[0]:make_1d_y_range[1],:], 0) * (dl_dv)**2 #Create 1D variance spectrum by collapsing 2D variance
 			else:
-				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv / pixels_per_sterradian #Create 1D spectrum by collapsing 2D spectrum
-				gridded_variance_1d = nansum(gridded_variance_2d, 0) * (dl_dv / pixels_per_sterradian)**2 #Create 1D variance spectrum by collapsing 2D variance
+				gridded_flux_1d = nansum(gridded_flux_2d, 0) * dl_dv #Create 1D spectrum by collapsing 2D spectrum
+				gridded_variance_1d = nansum(gridded_variance_2d, 0) * (dl_dv)**2 #Create 1D variance spectrum by collapsing 2D variance
 			badpix = (gridded_flux_1d==0.0) | (gridded_variance_1d==0.0)#nan out zeros
 			gridded_flux_1d[badpix] = nan
 			gridded_variance_1d[badpix] = nan
@@ -1657,10 +1704,10 @@ def getspec(date, waveno, frameno, stdno, oh=0, oh_scale=0.0, oh_flexure=0., std
 				spec2d = telluric_and_flux_calib(sci2d_obj, std_obj, stdflat_obj,  B=B, V=V, no_flux=no_flux, y_scale=y_scale, y_power=y_power, y_sharpen=y_sharpen, wave_smooth=wave_smooth, savechecks=savechecks, 
 					telluric_power=telluric_power, telluric_spectrum=telluric_spectrum, calibration=calibration, quality_cut=telluric_quality_cut, current_frame=str(date)+'_'+str(frameno)) #Run for 2D spectrum
 		else: #Else if using the new Pheonix stellar models for standard star correction...			
-			print('YOU HAVE SPECIFIED YOU WANT TO USE THE PHEONIX STELLAR MODEL'+phoenix_model)
-			spec1d = process_standard_star_with_phoenix_model(sci1d_obj, std_obj, phoenix_model, rv_shift=std_shift)
+			print('YOU HAVE SPECIFIED YOU WANT TO USE THE PHEONIX STELLAR MODEL '+phoenix_model)
+			spec1d = process_standard_star_with_phoenix_model(sci1d_obj, std_obj, stdflat_obj, B, V, phoenix_model, std_shift)
 			if twodim: #If user specifies this object has a 2D spectrum
-				spec2d  = process_standard_star_with_phoenix_model(sci2d_obj, std_obj, phoenix_model, rv_shift=std_shift)
+				spec2d  = process_standard_star_with_phoenix_model(sci2d_obj, std_obj, stdflat_obj, B, V, phoenix_model, std_shift)
 		#Return either 1D and 2D spectra, or just 1D spectrum if no 2D spectrum exists
 		if twodim:
 			return spec1d, spec2d #Return both 1D and 2D spectra objects
@@ -1800,8 +1847,13 @@ class spec1d:
 	# 						if trace == nan: trace = 0.
 	# 						flux[i] -= trace
 	# 			order.flux = flux	
-	# def to_muler_list(self): #Generate a muler l
-	# 	#STUFF
+	def to_muler_list(self): #Generate a muler list
+		echelle_list = []
+		for i in range(self.n_orders):
+			echelle_obj = EchelleSpectrum(flux=self.orders[i].flux*u.ct, spectral_axis=self.orders[i].wave*u.micron, uncertainty=StdDevUncertainty(self.orders[i].noise))
+			echelle_list.append(echelle_obj)
+		echelle_list = EchelleSpectrumList(echelle_list) #Convert eschelle_list from a ordinary python list to a EchelleSpectrumList object
+		return echelle_list
 	def subtract_continuum(self, show = False, size=0, sizes=[501], use_combospec=False): #Subtract continuum and background with an iterative running median
 		if size != 0:
 			sizes = [size]
@@ -2828,24 +2880,160 @@ class find_lines:
 
 
 #Generate a synthetic stellar spectrum  for standard stars using Phoenix stellar atmosphere models, gollum, and muler
-def process_standard_star_with_phoenix_model(sci, std, std_star_name, rv_shift=0.0):
+def process_standard_star_with_phoenix_model(sci, std, std_flattened, B, V, std_star_name, rv_shift, savechecks=True,
+	twomass_trans_curve_dir='../../../'):
 	#STUFF
-	min_wavelength = 14000 #Get min wavelength in spectrum
-	max_wavelength = 26000 #Get max wavelength in spectrum
+	min_wavelength = 4000 #Get min wavelength in spectrum
+	max_wavelength = 30000 #Get max wavelength in spectrum
 	resolving_power = 45000.0 #IGRINS resolution
+
+	extinction_model = GCC09_MWAvg() #Dust extinction model: https://dust-extinction.readthedocs.io/en/latest/api/dust_extinction.averages.G21_MWAvg.html#dust_extinction.averages.G21_MWAvg
 
 	if std_star_name == '18Lep':
 		#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
 		fraction_a = 0.5
 		native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
 		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0)
+		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
 		native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, metallicity=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
 		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)
-		breakpoint()
+		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)
+		#From best fit photometry in Cardiel et al. (2021), Teff=9056, logg=3.867, z=-0.5
+		# fraction_a = 0.75
+		# native_resolution_template_a = PHOENIXSpectrum(teff=9000, logg=4.0, metallicity=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0)
+		# native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=3.5, metallicity=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)
+	elif std_star_name == 'HD34317':
+		#From Teff and metallicities for Tycho-2 stars (Ammons+, 2006): Teff = 9296 K 
+		#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
+		fraction_a = 0.5
+		native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+		native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, metallicity=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
+	elif std_star_name == 'HR8422':
+		#From Gaia DR3 RV Template: Teff = 10000, logg=4.5, fe/h=0.25
+		#From Zorec et al. 2012: vsini=91 km/s, I found the rotational velocity to be lower when fitting the Br-gamma line.
+		fraction_a = 0.5 
+		native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+		native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, metallicity=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
+	elif std_star_name == 'HR598':
+		#From Gaia DR3 gsphot: Teff = 10473.918, logg=4.2997, fe/h=-0.1595
+		#From Gaia DR3 RV Template: Teff = 9000, logg=4.5, fe/h=0.25
+		fraction_a = 0.5 
+		native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(80.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+		native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, metallicity=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(80.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
 	else: # the underscore character is used as a catch-all.
 		raise Exception('The standard star name '+std_star_name+' does not match known standard stars.')
 
 
-	std_model_synthetic_spectrum = resample_list(native_resolution_template_a, std.orders) + resample_list(native_resolution_template_b, std.orders)*(1.0-fraction_a)
+	native_resolution_template_a = native_resolution_template_a.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
+	native_resolution_template_b = native_resolution_template_b.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
+
+	std_model_synthetic_spectrum = LinInterpResampler(native_resolution_template_a, native_resolution_template_a.spectral_axis)*(fraction_a)*1e-8 + LinInterpResampler(native_resolution_template_b, native_resolution_template_a.spectral_axis)*(1.0-  fraction_a)*1e-8 #1e-8 scales flux from cm^-1 to angstrom^-1
+	#std_model_synthetic_spectrum = LinInterpResampler(std_model_synthetic_spectrum, input_spectrum.spectral_axis)
+	std_model_synthetic_spectrum.__class__ = EchelleSpectrum
+	
+	interp_std_flux = interp1d(std_model_synthetic_spectrum.spectral_axis.micron, std_model_synthetic_spectrum.flux)
+
+
+	scale_std_flux = vega_V_flambdla_zero_point / interp_std_flux(V_band_effective_lambda)
+
+
+	magnitude_scale = 10**(0.4*(0.03 - V)) #Scale flux by difference in V magnitude between standard star and Vega (V for vega = 0.03 in Simbad)
+
+	for i in range(std.n_orders):
+		synthetic_std_spec_for_order = LinInterpResampler(std_model_synthetic_spectrum, std.orders[i].wave * u.micron) * 1e4 #Convert angstrom^-1 -> um^-1
+		
+		relative_flux_calibration =  std.orders[i].flux  / (synthetic_std_spec_for_order.flux.value * scale_std_flux * magnitude_scale * (1/(4*pi)) ) # divide by 4 pi sterradians so the final flux units are erg s^-1 cm^-2 um^-1 sr^-1
+		s2n =  ((1.0/sci.orders[i].s2n()**2) + (1.0/std.orders[i].s2n()**2))**-0.5  #Error propogation after telluric correction, see https://wikis.utexas.edu/display/IGRINS/FAQ or http://chemwiki.ucdavis.edu/Analytical_Chemistry/Quantifying_Nature/Significant_Digits/Propagation_of_Error#Arithmetic_Error_Propagation
+		sci.orders[i].flux /= relative_flux_calibration   #Apply telluric correction and flux calibration
+		sci.orders[i].noise = sci.orders[i].flux / s2n #It's easiest to just work back the noise from S/N after calculating S/N, plus it is now properly scaled to match the (relative) flux calibrati
+		
+	# 	plot(std.orders[i].wave, std.orders[i].flux, color='black')
+	# 	normalized_synthetic_std_spec_for_order_flux = synthetic_std_spec_for_order.flux.value / nanmedian(synthetic_std_spec_for_order.flux.value)
+	# 	plot(std.orders[i].wave, std.orders[i].flux / normalized_synthetic_std_spec_for_order_flux, color='red')
+	# 	plot(std.orders[i].wave, std.orders[i].flux / std_flattened.orders[i].flux / normalized_synthetic_std_spec_for_order_flux, color='blue')
+
+	# show()
+
+	#Print estimated J,H,K magnitudes as a sanity check to compare to 2MASS
+	bands = ['J', 'H', 'Ks']
+	f0_lambda = array([3.129e-13, 1.133e-13, 4.283e-14]) * 1e7  #Convert units to from W cm^-2 um^-1 to erg s^-1 cm^-2 um^-1
+	x = arange(1.0, 3.0, 1e-6)
+	delta_lambda = abs(x[1]-x[0])
+	
+	resampled_synthetic_spectrum =  LinInterpResampler(std_model_synthetic_spectrum , x*u.um).flux.value * magnitude_scale * scale_std_flux #* 1e-4 * magnitude_scale * vega_R_over_D_squared
+
+	for i in range(len(bands)):
+		tcurve_wave, tcurve_trans = loadtxt(path_to_pheonix_models + '/2MASS_transmission_curves/'+bands[i]+'.dat', unpack=True) #Read in 2MASS band filter transmission curve
+		#tcurve_trans[tcurve_trans < 0] = 0.0 #Zero out negative values
+		tcurve_interp = interp1d(tcurve_wave, tcurve_trans, kind='cubic', fill_value=0.0, bounds_error=False) #Create interp obj for the transmission curve
+		tcurve_resampled =  tcurve_interp(x)
+		f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
+		magnitude = -2.5 * log10(f_lambda / f0_lambda[i])# - (0.03 - V)
+		print('For band '+bands[i]+' the estimated magnitude for '+std_star_name+': '+str(magnitude))
+	if savechecks: #If user specifies saving pdf check files 
+		with PdfPages(save.path + 'check_flux_calib.pdf') as pdf: #Load pdf backend for saving multipage pdfs
+			#Plot easy preview check of how well the H I lines are being corrected
+			clf() #Clear page first
+			expected_continuum = copy.deepcopy(std_flattened) #Create object to store the "expected continuum" which will end up being the average of each order's adjacent blaze functions from what the PLP thinks the blaze is for the standard star
+			g = Gaussian1DKernel(stddev=5.0) #Do a little bit of smoothing of the blaze functions
+			for i in range(2,std.n_orders-2): #Loop through each order
+			        adjacent_orders = array([convolve(std.orders[i-1].flux/std_flattened.orders[i-1].flux, g),   #Combine the order before and after the current order, while applying a small amount of smoothing
+			                                 convolve(std.orders[i+1].flux/std_flattened.orders[i+1].flux, g),])
+			        mean_order = nanmean(adjacent_orders, axis=0) #Smooth the before and after order blazes together to estimate what we think the continuum/blaze should be
+			        expected_continuum.orders[i].flux = mean_order #Save the expected continuum
+			expected_continuum.combine_orders()#Combine all the orders in the expected continuum
+			HI_line_waves = [2.166120, 1.7366850, 1.6811111, 1.5884880] #Wavelengths of H I lines will be previewing
+			HI_line_labes = ['Br-gamma','Br-10','Br-11', 'Br-14'] #Names of H I lines we will be previewing
+			delta_wave = 0.012 # +/- wavelength range to plot on the xaxis of each line preview
+			n_HI_lines = len(HI_line_waves) #Count up how many H I lines we will be plotting
+			subplots(nrows=2, ncols=2) #Set up subplots
+			figtext(0.02,0.5,r"Flux", fontsize=20,rotation=90) #Set shared y-axis label
+			figtext(0.4,0.02,r"Wavelength [$\mu$m]", fontsize=20,rotation=0) #Set shared x-axis label
+			#figtext(0.05,0.95,r"Check AOV H I line fits (y-scale: "+str(y_scale)+", y-power: "+str(y_power)+", y_sharpen: "+str(y_sharpen)+" wave_smooth: "+str(wave_smooth)+", std_shift: "+str(std_shift)+")", fontsize=12,rotation=0) #Shared title
+			std.combine_orders()
+			waves = std.combospec.wave #Wavelength array to interpolate to
+			normalized_HI_lines =  LinInterpResampler(std_model_synthetic_spectrum, std.combospec.wave*u.um)
+
+
+			normalized_HI_lines = normalized_HI_lines / nansum(normalized_HI_lines.flux.value)
+			#normalized_HI_lines = a0v_synth_cont(waves)/a0v_synth_spec(waves) #Get normalized lines to the wavelength array
+			for i in range(n_HI_lines): #Loop through each H I line we want to preview
+				j = (std.combospec.wave > HI_line_waves[i]-delta_wave) & (std.combospec.wave < HI_line_waves[i]+delta_wave) #Find only pixels in window of x-axis range for automatically determining y axis range				
+				m = (normalized_HI_lines.flux.value[j][0] -  normalized_HI_lines.flux.value[j][-1]) / ((normalized_HI_lines.wavelength[j][0]  / u.um) - (normalized_HI_lines.wavelength[j][-1]  / u.um))
+				b = normalized_HI_lines.flux.value[j][-1] - m*(normalized_HI_lines.wavelength[j][-1]/u.um)
+				normalized_HI_lines_corrected = normalized_HI_lines.flux.value / (m*(normalized_HI_lines.wavelength / u.um) + b)
+				subplot(2,2,i+1) #Set up current line's subplot
+				#tight_layout(pad=5) #Use tightlayout so things don't overlap
+				fig = gcf()#Adjust aspect ratio
+				fig.set_size_inches([15,10]) #Adjust aspect ratio
+				plot(std.combospec.wave, std.combospec.flux, label='H I Uncorrected', color='gray') #Plot raw A0V spectrum, no H I correction applied
+				#plot(std.combospec.wave, std.combospec.flux*normalized_HI_lines, label='H I Corrected',color='black') #Plot raw A0V spectrum with H I correction applied
+				plot(std.combospec.wave, std.combospec.flux / normalized_HI_lines_corrected, label='H I Corrected',color='black') #Plot raw A0V spectrum with H I correction applied				
+				plot(expected_continuum.combospec.wave, expected_continuum.combospec.flux, label='Expected Continuum', color='blue') #Plot expected continuu, which the average of each order's adjacent A0V continnua
+				xlim(HI_line_waves[i]-delta_wave, HI_line_waves[i]+delta_wave) #Set x axis range
+				max_flux = nanmax(std.combospec.flux[j] / normalized_HI_lines_corrected[j]) #Min y axis range
+				min_flux = nanmin(std.combospec.flux[j] / normalized_HI_lines_corrected[j]) #Max y axis range
+				ylim([0.9*min_flux,1.02*max_flux]) #Set y axis range
+				title(HI_line_labes[i]) #Set title
+				if i==n_HI_lines-1: #If last line is being plotted
+					legend(loc='lower right') #plot the legend
+			tight_layout(pad=4)
+			pdf.savefig() #Save plots showing how well the H I correciton (scaling H I lines from Vega) fits
+
+	return(sci) #Return the spectrum object (1D or 2D) that is now flux calibrated and telluric corrected

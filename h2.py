@@ -26,8 +26,8 @@ wave_thresh = 0.2 #Set wavelength threshold (here 0.1 um) for trying to measure 
 #cloudy_dir = '/Volumes/home/CLOUDY/'
 #cloudy_dir = '/Volumes/IGRINS_Data/CLOUDY/'
 #cloudy_dir = '/Users/kfkaplan/Desktop/CLOUDY/'
-#cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
-cloudy_dir = '/Users/kkaplan1/Desktop/workathome_igrins_data/CLOUDY/'
+cloudy_dir = '/Volumes/IGRINS_Data_Backup/CLOUDY/'
+# cloudy_dir = '/Users/kkaplan1/Desktop/workathome_igrins_data/CLOUDY/'
 data_dir = 'data/' #Directory where H2 data is stored for cloudy
 # energy_table = data_dir + 'energy_X.dat' #Name of table where Cloudy stores data on H2 electronic ground state rovibrational energies
 # transition_table = data_dir + 'transprob_X.dat' #Name of table where Cloudy stores data on H2 transition probabilities (Einstein A coeffs.)
@@ -722,6 +722,14 @@ class h2_transitions:
 		self.sig_rot_T = zeros(n_lines) #Store uncertainity in rotation temperature fit
 		self.res_rot_T =  zeros(n_lines) #Store residuals from offset of line fitting rotation temp
 		self.sig_res_rot_T =  zeros(n_lines) #Store uncertainity in residuals from fitting rotation temp (e.g. using covariance matrix)
+	def generate_states(self): #Returns a states object based on the average column densities of the levels in this transitions object
+		s = states()
+		for J in range(1,25):
+			for V in range(1,15): #Loop through each V ladder
+				use_these = (self.J.u == J) & (self.V.u==V) & (self.N > 0.)
+				if any(use_these):
+					s.N[(s.J==J) & (s.V==V)] = exp(nanmean(log(self.N[use_these])))
+		return s
 	def tin(self, v, J): #Find and return indicies of transitions into a given level defined by v and J
 		return where((self.V.l == v) & (self.J.l == J))
 	def tout(self, v, J): #FInd and return indicies of transitions out of a given level defined by v and J(self.V.u == v) & (self.J.u == J)
@@ -762,7 +770,7 @@ class h2_transitions:
 	def normalize(self, label='5-3 O(3)', value=1.):
 		i = self.label == label
 		if self.N[i] > 0.: #Check if line even exists
-			normalize_by_this = value * self.N[i] #/ self.g[i]#Grab column density of line to normalize by
+			normalize_by_this = self.N[i] / value #/ self.g[i]#Grab column density of line to normalize by
 			self.N /= normalize_by_this #Do the normalization
 			self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 		else:
@@ -1342,7 +1350,7 @@ class h2_transitions:
 				x = self.T[goodpix]
 				y = log(self.N[goodpix]/self.g[goodpix])
 				sigma = plus_one_sigma[goodpix]
-				vary_y_intercept = 7.0
+				vary_y_intercept = 40.0
 				vary_temp = 3000.0
 				guess = array([10.0, 1000.0])
 				upper_bound = guess + array([vary_y_intercept, vary_temp])
