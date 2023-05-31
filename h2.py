@@ -12,6 +12,7 @@ from scipy.linalg import lstsq
 from bottleneck import *
 from astropy.io import ascii
 from numpy import random
+from numpy.random import randn
 #from numba import jit #Import numba
 
 
@@ -50,6 +51,110 @@ symbol_list = ['o','v','8','x','s','*','h','D','^','8','1','o','o','o','o','o','
 # 	f, axs = subplots(8, 2, sharex='col', sharey='row')v
 # 	for x in range(8):
 # 		axs[i]
+
+#This function is similar to bootstrapping but the values of y are varied in each iteration by a random amount based on their 1-sigma errors
+#I have no idea if this is statistically valid but we'll find out if it works
+# def wiggle_bootstrap_temp_fit(x, y, guess, sigma, bounds, n=10000):
+# 	b = zeros(n) #Define arrays that will hold the results
+# 	T = zeros(n)
+# 	b_error = zeros(n)
+# 	T_error = zeros(n)
+# 	#wiggled_y = zeros(len(y))
+# 	for i in range(n): #Loop through each iteration
+# 		#for j in range(len(y)):
+# 		#	wiggled_y[j] = gauss(y[j], sigma[j])
+# 		wiggled_y = y + randn(len(y))*sigma
+# 		fit, cov = curve_fit(single_temp_func, x, wiggled_y, guess, bounds=bounds) #Run curve_fit with y varied 
+# 		b[i], T[i] = fit  #Grab the results
+# 		#b_err, T_err = sqrt(diag(cov)) 
+# 	return mean(b), mean(T), std(b), std(T) #Return the results
+
+def fit_exponential_for_temp(x, y, sigma, n=10000, guess=array([500.0, 2000.0, 100.0])):
+	# guess = array([500.0, 2000.0, 1.0]) #Setup initial guesses and bounds for curve_fit
+	upper_bound = array([1e9, 2e7, 1e5])
+	lower_bound = array([0.,0., 0.,])
+	goodpix = isfinite(y) & (y != 0.) #Mask unused or bad pixels
+	x_filtered = x[goodpix]
+	y_filtered = y[goodpix]
+	sample_size = len(y_filtered)
+	sigma_filtered = sigma[goodpix]
+
+	fit, cov = curve_fit(exponential_form_temp_func, x_filtered, y_filtered, p0=guess, bounds=[lower_bound, upper_bound])
+	A, T, b = fit
+	A_err, T_err, b_err = sqrt(diag(cov))
+	# fit_init = models.Exponential1D(amplitude=A, tau=-T)#+ models.Const1D(amplitude=b)
+	# fitter =T_err fitting.LevMarLSQFitter(calc_uncertainties=True)
+	# for i in range(10): #Iterate a few times to ensure a good fit
+	# 	fit = fitter(fit_init, x_filtered, y_filtered, weights=1/sigma_filtered)
+	# 	fit_init = models.Exponential1D(amplitude=fit.amplitude, tau=fit.tau)#+ models.Const1D(amplitude=fit.amplitude_1)
+	# T = -fit.tau.value
+	# try:
+	# 	T_err = fit.stds['tau']
+	# except:
+	# 	T_err = nan
+	# b = log(fit.amplitude)
+	# try:
+	# 	b_err = log(fit.stds['amplitude'])
+	# except:
+	# 	b_err = nan
+	# 	breakpoint()
+	# best_fit = copy.deepcopy(fit)
+	# if sample_size > 2: #Jackknife sanity check
+	# 	a = arange(sample_size) #Jackknife test
+	# 	T_array = zeros(sample_size-1)
+	# 	A_array = zeros(sample_size-1)
+	# 	for i in range(sample_size-1): 
+	# 		resample = concatenate([a[:i], a[(i+1):]]) #random_integers(0, sample_size-1, sample_size)
+	# 		fit = fitter(fit_init, x_filtered[resample], y_filtered[resample], weights=1/sigma_filtered[resample])
+	# 		T_array[i] = -fit.tau.value
+	# 		A_array[i] = fit.amplitude.value
+	# 	print('Jackknife technique sanity check')
+	# 	print('b = ', mean(log(A_array)), '+/-', std(log(A_array)))
+	# 	print('T = ', mean(T_array), '+/-', std(T_array))
+		# n = 10000 #Wobble bootstrap or flux resampling test
+		# T_array = zeros(n) 
+		# A_array = zeros(n)	
+		# best_fit_y = best_fit(x_filtered)	
+		# weights = 1/sigma_filtered
+		# for i in range(n): 
+		# 	#vary_by = randn(sample_size)*sigma_filtered
+		# 	#sigma_varied_by = sqrt(sigma_filtered**2 + vary_by**2)
+		# 	try:
+		# 		fit = fitter(fit_init, x_filtered, best_fit_y+randn(sample_size)*sigma_filtered, weights=weights)
+		# 		T_array[i] = -fit.tau.value
+		# 		A_array[i] = fit.amplitude.value
+		# 	except: 
+		# 		print('Ooops a bad fit was found.  Moving on.')
+		# print('Wobble bootstrap sanity check')
+		# goodfits = T_array > 0.
+		# print('b = ', mean(log(A_array[goodfits])), '+/-', std(log(A_array[goodfits])))
+		# print('T = ', mean(T_array[goodfits]), '+/-', std(T_array[goodfits]))
+		#breakpoint()
+	return b, T, b_err, T_err
+
+
+
+
+
+def bootstrap_temp_fit(x, y, guess, n=10000):
+	b = zeros(n) #Define arrays that will hold the results
+	T = zeros(n)
+	x_new = (x[:,newaxis] * ones(shape(y))).flatten()
+	y_new = y.flatten()
+	goodpix = isfinite(y_new)
+	x_new = x_new[goodpix]
+	y_new = y_new[goodpix]
+	sample_size = len(y_new)
+	line_init = models.Linear1D(intercept=guess[0], slope=guess[1])
+	fitter = fitting.LinearLSQFitter(calc_uncertainties=False)
+	for i in range(n): #Loop through each iteration
+		print(i,'/',n)
+		sample = random_integers(0, sample_size-1, sample_size)
+		fit = fitter(line_init, x_new[sample], y_new[sample])
+		b[i] = fit.intercept.value
+		T[i] = -1.0/fit.slope.value
+	breakpoint()
+	return mean(b), mean(T), std(b), std(T) #Return the results
 
 
 
@@ -162,6 +267,8 @@ def multi_temp_func(x,b, c1, c2, c3, T1, T2, T3): #Function of 3 temperatures an
 def single_temp_func(x,b,T): #Function of a single temperature for fitting noltzmann diagrams for gas with a single thermal component
 	return b - (x/T)
 
+def exponential_form_temp_func(x, A, T, b): #Function for a single temperature for fitting a Boltzmann diagram for gas with aa single thermal component, but in exponential form
+	return b + A*exp(-x/T)
 
 def linear_function(x, m, b): #Define a linear function for use with scipy.optimize curve_fit, for fitting rotation temperatures
 	return m*x + b
@@ -741,6 +848,10 @@ class h2_transitions:
 		#self.Nsigma = self.sigma /  (self.g * self.E.diff() * h * c * self.A)
 		self.N = 4 * pi * self.F / (self.E.diff() * h * c * self.A)
 		self.Nsigma =  4 * pi * self.sigma /  (self.E.diff() * h * c * self.A)
+
+		#self.T_monte_carlo = self.T[:,newaxis] * ones([self.n_lines, 10000])
+		#self.N_monte_carlo = self.N[:,newaxis] + self.Nsigma[:,newaxis] * randn(self.n_lines, 10000)#zero([self.n_lines, 10000])
+
 		if normalize: #By default normalize to the 1-0 S(1) line, set normalize = False if using absolute flux calibrated data
 			self.normalize()
 			#N_10_S1 = self.N[self.label == '1-0 S(1)'] #Grab column density derived from 1-0 S(1) line
@@ -767,10 +878,14 @@ class h2_transitions:
 				line_profile =  beta *  exp(-((c_km_s * ((wave/current_wavelength) - 1.0)-centroid)**2/(alpha))) #Calculate gaussian line profile in wavelength space
 				flux = flux + self.F[i]*line_profile #Build up line on flux grid
 		return wave, flux #Return wavlelength and flux grids
-	def normalize(self, label='5-3 O(3)', value=1.):
+	def normalize(self, label='5-3 O(3)', value=1., by_g=False):
 		i = self.label == label
 		if self.N[i] > 0.: #Check if line even exists
-			normalize_by_this = self.N[i] / value #/ self.g[i]#Grab column density of line to normalize by
+			if by_g: #Also include the quantum degeneracy in the normalization if the user desires
+				normalize_by_this = self.N[i] / self.g[i]
+			else: #Default
+				normalize_by_this = self.N[i] / value #/ self.g[i]#Grab column density of line to normalize by
+			#self.N_monte_carlo /= normalize_by_this #Do the normalization
 			self.N /= normalize_by_this #Do the normalization
 			self.Nsigma /= normalize_by_this #Ditto on the uncertainity
 		else:
@@ -816,7 +931,8 @@ class h2_transitions:
 		#print(self.label[found_transitions])#Find all matching transitions in the specified wavelength range with a matching upper J and V state
 		#print(self.wave[found_transitions])
 	def set_flux(self, region): #Set the flux of a single line or multiple lines given the label for it, e.g. h2.set_flux('1-0 S(1)', 456.156)
-		self.path = region.path #Set path to 
+		if hasattr(region, 'path'): #Error catch
+			self.path = region.path #Set path to 
 		n = len(region.label)
 		if n == 1: #If only a single line
 			matched_line = (self.label == region.label)
@@ -829,8 +945,11 @@ class h2_transitions:
 				matched_line = (self.label == region.label[i])
 				if any(matched_line): #If any matches are found...
 					self.F[matched_line] = region.flux[i] #And set flux
-					self.s2n[matched_line] = region.s2n[i] #Set S/N for a single line
 					self.sigma[matched_line] = region.sigma[i] #Set sigma (uncertainity) for a single line
+					if hasattr(region, 's2n'): #Error catch
+						self.s2n[matched_line] = region.s2n[i] #Set S/N for a single line
+					else:
+						self.s2n[matched_line] = region.flux[i] / region.sigma[i] #Set S/N for a single line if .s2n is not existant, just calculate from flux/sigma
 	def read_model(self, labels, flux): #Read in fluxes from model
 		for i in range(len(labels)): #Loop through each line
 			matched_line = (self.label == labels[i]) #Match to H2 line
@@ -1127,7 +1246,7 @@ class h2_transitions:
 		empty_fill =False, full_fill=False, show_labels=False, x_range=[0.,0.], y_range=[0.,0.], rot_temp=False, show_legend=True, rot_temp_energy_limit=100000., 
 		rot_temp_residuals=False, fname='', clear=True, legend_fontsize=14, line=False, subtract_single_temp = False, single_temp=default_single_temp, no_legend_label=False,
 		single_temp_y_intercept=default_single_temp_y_intercept, no_zero_x = False, show_axis_labels=True, ignore_x_range=False, label_J=False, label_V=False, multi_temp_fit=False, single_temp_fit=False,
-		single_color='none', show_ratio=False, symbsize = 9, single_temp_use_sigma=False):
+		single_color='none', show_ratio=False, symbsize = 9, single_temp_use_sigma=False, semilog=False):
 		if fname == '':
 			fname=self.path + '_excitation_diagram.pdf'
 		with PdfPages(fname) as pdf: #Make a pdf
@@ -1182,7 +1301,8 @@ class h2_transitions:
 			#minus_one_sigma = abs(log_N - data_single_temp  - log(self.N - exp(data_single_temp) - self.Nsigma)) #Lower 1 sigma errors in log space
 
 
-
+			if semilog: #If user wants to make a semi-log plot, convert log(N/g) to N/g
+				log_N = e**log_N
 
 			for i in use_upper_v_states:
 				if single_color != 'none': #If user specifies a specific color, use that single color
@@ -1211,13 +1331,13 @@ class h2_transitions:
 					if nansum(self.s2n[ortho]) == 0.:
 						plot(self.T[ortho], log_N[ortho], current_symbol,  color=current_color, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 					else:
-						y_error_bars = [minus_one_sigma[ortho], plus_one_sigma[ortho]] #Calculate upper and lower ends on error bars
+						y_error_bars = [minus_one_sigma[ortho], minus_one_sigma[ortho]] #Calculate upper and lower ends on error bars
 						errorbar(self.T[ortho], log_N[ortho], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, markersize=symbsize, fillstyle=orthofill)  #Plot data + error bars
 						if show_upper_limits:
 							test = errorbar(self.T[ortho_upperlimit], upper_limits[ortho_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2,uplims=True, markersize=symbsize, fillstyle=orthofill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in range(len(log_N[ortho])): #Loop through each point to label
-							if  y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1]): #check to make sure label is in plot y range
+							if  (y_range[1] == 0 or (log_N[ortho][j] > y_range[0] and log_N[ortho][j] < y_range[1])) and (x_range[1] == 0 or (self.T[ortho][j] > x_range[0] and self.T[ortho][j] < x_range[1])): #check to make sure label is in plot y range
 								text(self.T[ortho][j], log_N[ortho][j], '        '+self.label[ortho][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					if label_J: #If user specifies labels for J
 						for j in range(len(log_N[ortho])): #Loop through each point to label
@@ -1258,14 +1378,14 @@ class h2_transitions:
 					if nansum(self.s2n[para]) == 0.:
 						plot(self.T[para], log_N[para], current_symbol,  color=current_color, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 					else:
-						y_error_bars = [minus_one_sigma[para], plus_one_sigma[para]] #Calculate upper and lower ends on error bars
+						y_error_bars = [minus_one_sigma[para], minus_one_sigma[para]] #Calculate upper and lower ends on error bars
 						#errorbar(self.T[para], log_N, yerr=y_error_bars, fmt=current_symbol,  color=current_color, label='v='+str(i), capthick=3, markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						errorbar(self.T[para], log_N[para], yerr=y_error_bars, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2,markersize=symbsize, fillstyle=parafill)  #Plot data + error bars
 						if show_upper_limits:
 							test = errorbar(self.T[para_upperlimit], upper_limits[para_upperlimit], yerr=1.0, fmt=current_symbol,  color=current_color, capthick=3, elinewidth=2, uplims=True, markersize=symbsize, fillstyle=parafill) #Plot 1-sigma upper limits on lines with no good detection (ie. S/N < 1.0)
 					if show_labels: #If user wants to show labels for each of the lines
 						for j in range(len(log_N[para])): #Loop through each point to label
-							if  y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1]): #check to make sure label is in plot y range
+							if  (y_range[1] == 0 or (log_N[para][j] > y_range[0] and log_N[para][j] < y_range[1])) and (x_range[1] == 0 or (self.T[para][j] > x_range[0] and self.T[para][j] < x_range[1])): #check to make sure label is in plot y range
 								text(self.T[para][j], log_N[para][j], '        '+self.label[para][j], fontsize=8, verticalalignment='bottom', horizontalalignment='left', color='black')  #Label line with text
 					if label_J: #If user specifies labels for J
 						for j in range(len(log_N[para])): #Loop through each point to label
@@ -1286,9 +1406,15 @@ class h2_transitions:
 			tick_params(labelsize=14) #Set tick mark label size
 			if show_axis_labels: #By default print the axis labels, but the user can turn these off if so desired (replacing them with custom labels if needed)
 				if normalize: #If normalizing to the 1-0 S(1) line
-					ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+					if not semilog:
+						ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
+					else:
+						ylabel("Column Density   (N$_u$/g$_u$)-(N$_{r}$/g$_{r}$)", fontsize=labelsize)
 				else:  #If using absolute flux calibrated data
-					ylabel("Column Density   ln(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
+					if not semilog:
+						ylabel("Column Density   ln(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
+					else:
+						ylabel("Column Density   (N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
 				xlabel("Excitation Energy     (E$_u$/k)     [K]", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
 				if any(self.T[self.s2n >= s2n_cut]) and not no_zero_x: #Catch error
@@ -1327,6 +1453,10 @@ class h2_transitions:
 				text(0.7*x[int(midpoint)], 0.7*(single_temp_y_intercept - (x[int(midpoint)] / single_temp)), "T = "+str(single_temp)+" K", color='orange')
 			if multi_temp_fit: #If user specifies they want to fit a multi temperature gas
 				goodpix = (self.s2n > 5.0) & (self.N > 0.)
+				if -1 not in V:
+					for i in range(15): #Use only levels in the listed vibration levels
+						if i not in V:
+							goodpix[self.V.u == i] = False
 				x = self.T[goodpix]
 				y = log(self.N[goodpix]/self.g[goodpix])
 				vary_y_intercept = 7.0
@@ -1346,34 +1476,86 @@ class h2_transitions:
 				print('c = ', c)
 				print('T = ', T)
 			if single_temp_fit: #If user specifies they want to do a single temperature fit (ie. for shocks) 
-				goodpix = (self.s2n > s2n_cut) & (self.N > 0.)
-				x = self.T[goodpix]
-				y = log(self.N[goodpix]/self.g[goodpix])
-				sigma = plus_one_sigma[goodpix]
-				vary_y_intercept = 40.0
-				vary_temp = 3000.0
-				guess = array([10.0, 1000.0])
-				upper_bound = guess + array([vary_y_intercept, vary_temp])
-				lower_bound = guess - array([vary_y_intercept, vary_temp])
-				if single_temp_use_sigma: #If user specifies using the statistical 1 sigma uncertainity in the fit
-					fit, cov = curve_fit(single_temp_func, x, y, guess, sigma, bounds=[lower_bound, upper_bound])
-				else: #Don't use statistical sigma in fit
-					fit, cov = curve_fit(single_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
-				b, T = fit
-				b_err, T_err = sqrt(diag(cov))
-				x = arange(min(x)-1000.0,max(x)+1000.0,0.1)
+				goodpix = (self.s2n > s2n_cut) & (self.N > 0.) & (self.T >= x_range[0]) & (self.T <= x_range[1])
+				if -1 not in V:
+					for i in range(15): #Use only levels in the listed vibration levels
+						if i not in V:
+							goodpix[self.V.u == i] = False
+				#x = self.T[goodpix]
+				#y = log(self.N[goodpix]/self.g[goodpix])
+				#sigma = minus_one_sigma[goodpix]
+				# vary_y_intercept = 40.0
+				# vary_temp = 3000.0
+				# guess = array([10.0, 1000.0])
+				# upper_bound = guess + array([vary_y_intercept, vary_temp])
+				# lower_bound = guess - array([vary_y_intercept, vary_temp])
+				# # if single_temp_use_sigma: #If user specifies using the statistical 1 sigma uncertainity in the fit
+				# 	fit, cov = curve_fit(single_temp_func, x, y, guess, sigma, bounds=[lower_bound, upper_bound])
+				# else: #Don't use statistical sigma in fit
+				# 	fit, cov = curve_fit(single_temp_func, x, y, guess, bounds=[lower_bound, upper_bound])
+				# b, T = fit
+				# b_err, T_err = sqrt(diag(cov))
+
+				# line_init = models.Linear1D(intercept=guess[0], slope=guess[1])
+				# fitter = fitting.LinearLSQFitter(calc_uncertainties=True)
+				# fit = fitter(line_init, x, y, weights=1.0/sigma)
+				# b = fit.intercept.value
+				# T = -1.0/fit.slope.value
+				# if fit.slope.std != None:
+				# 	slope_std = fit.slope.std
+				# 	b_err = fit.intercept.std
+				# else:
+				# 	slope_std = two_point_slope_uncertainity(x,y,sigma)
+				# 	b_err = -999.0
+				
+				# T_err_plus = abs(T - (-1.0/(fit.slope.value-slope_std))) #Calcualte both possible T_errs
+				# T_err_minus = abs(T - (-1.0/(fit.slope.value+slope_std)))
+				b, T, b_err, T_err = fit_exponential_for_temp(self.T[goodpix], self.N[goodpix]/self.g[goodpix], self.Nsigma[goodpix]/self.g[goodpix])
+				#b, T, b_err, T_err = wiggle_bootstrap_temp_fit(x, y, guess, sigma, [lower_bound, upper_bound], n=1000)
+				x = arange(min(self.T[goodpix])-1000.0,max(self.T[goodpix])+1000.0,0.1)
 				plot(x, b-x/T,'--', color='Black', linewidth=2)
-				print('Results from temperature fit to Boltzmann diagram data:')
+				print('Results from temperature fit ')
 				print('b = ', b, ' +/- ', b_err)
 				print('T = ', T, ' +/- ', T_err)
+
 				#stop()
 				self.model_ratio = self.N /  (self.g*exp(b-self.T/T)) #Calcualte and store ratio of 
+
+
+				#TESTING N monte carlo fitting to compare the results
+				#x = self.T
+				#y = log(self.N_monte_carlo/self.g[:,newaxis])
+				#fit = fitter(line_init, x[goodpix], y[goodpix])
+				#slope_std_monte_carlo = fit.slope.std
+				#b_err_monte_carlo = fit.intercept.std
+
+				#b_monte_carlo = fit.intercept.value
+				#T_monte_carlo = -1.0/fit.slope.value
+				#b_monte_carlo, T_monte_carlo, b_err_monte_carlo, T_err_monte_carlo = bootstrap_temp_fit(x, y, guess)
+				#b_expfit, T_expfit, b_expfit_err, T_expfit_err = fit_exponential_for_temp(self.T[goodpix], self.N[goodpix]/self.g[goodpix], self.Nsigma[goodpix]/self.g[goodpix])
+				#b, T, b_err, T_err = fit_exponential_for_temp(self.T[goodpix], self.N[goodpix]/self.g[goodpix], self.Nsigma[goodpix]/self.g[goodpix])
+
+				#T_err_plus_monte_carlo = abs(T_monte_carlo - (-1.0/(fit.slope.value-slope_std_monte_carlo))) #Calcualte both possible T_errs
+				#T_err_minus_monte_carlo = abs(T_monte_carlo - (-1.0/(fit.slope.value+slope_std_monte_carlo)))
+
+				#plot(x, b_expfit-x/T_expfit,'--', color='red', linewidth=2)
+
+				# print('Results from temperature fit to data in linear space with an exponential:')
+				# print('b = ', b_expfit, ' +/- ', b_expfit_err)
+				# #print('T = ', T_monte_carlo, ' +/- ', T_err_monte_carlo)
+				# print('T = ', T_expfit, ' +/- ', T_expfit_err)
+
+				#breakpoint()
+
 			#show()
+			if semilog: #Make a semilog plot instead of using log(N/g) if that is what the user wants
+				semilogy()
 			draw()
 			if savepdf:
 				pdf.savefig() #Add in the pdf
 			#stop()
 			if single_temp_fit:
+				#return T, T_err_plus, T_err_minus
 				return T, T_err
 	#Plot 
 	def rotation_plot(self, show_upper_limits = True, nocolor = False, V=[-1], s2n_cut=-1.0, normalize=True, savepdf=True, orthopara_fill=True, empty_fill =False, full_fill=False,
@@ -1452,7 +1634,7 @@ class h2_transitions:
 			if normalize: #If normalizing to the 1-0 S(1) line
 				ylabel("Column Density   ln(N$_u$/g$_u$)-ln(N$_{r}$/g$_{r}$)", fontsize=labelsize)
 			else:  #If using absolute flux calibrated data
-				ylabel("Column Density   pn(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
+				ylabel("Column Density   ln(N$_u$/g$_u$) [cm$^{-2}$]", fontsize=labelsize)
 			xlabel("Upper Rotation State J$_u$", fontsize=labelsize, labelpad=4)
 			if x_range[1] == 0.0: #If user does not specifiy a range for the x-axis
 				xlim([0,1.4*max(self.J.u[self.s2n >= s2n_cut])]) #Autoscale
@@ -1613,6 +1795,7 @@ class h2_transitions:
 		print('Best fit A_K = ', best_fit_A_K)
 		A_lambda = best_fit_A_K * self.wave**(-best_fit_alpha) / lambda0**(-best_fit_alpha) #Calculate an extinction correction
 		self.F *= 10**(0.4*A_lambda) #Apply extinction correction
+		self.sigma *= 10**(0.4*A_lambda)
 		self.calculate_column_density(normalize=False) #Calculate column densities from each transition, given the new extinction correction
 		self.A_K = best_fit_A_K #Store extinction paramters in case user wants to inspect or tabulate them later
 		self.alpha = best_fit_alpha
