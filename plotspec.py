@@ -2480,7 +2480,7 @@ class spec2d:
 		combospec.noise = combospec.noise[:,0:xr]
 		#combospec.s2n = combospec.s2n[:,0:xr]
 		self.combospec = combospec #save the orders all stitched together
-	def plot(self, spec_lines, pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
+	def plot(self, spec_lines='', pause = False, close = False, s2n = False, label_OH = True, num_wave_labels = 50):
 		if not hasattr(self, 'combospec'): #Check if a combined spectrum exists
 			print('No spectrum of combined orders found.  Createing combined spectrum.')
 			self.combine_orders() #If combined spectrum does not exist, combine the orders
@@ -2508,7 +2508,7 @@ class spec2d:
 		if close:
 			ds9.close()
 	#Function for labeling up 2D spectrum in DS9, creates a region file storing all the labels and than reads it into, called by show()
-	def make_label2d(self, spec_lines, label_lines = True, label_wavelength = True, label_OH = True, num_wave_labels = 50):
+	def make_label2d(self, spec_lines='', label_lines = True, label_wavelength = True, label_OH = True, num_wave_labels = 50):
 		regions = [] #Create list to store strings for creating a DS9 region file
 		wave_pixels = self.combospec.wave #Extract 1D wavelength for each pixel
 		x = arange(len(wave_pixels)) + 1.0 #Number of pixels across detector
@@ -2539,7 +2539,7 @@ class spec2d:
 				x_label = str(x_labels[j])
 				regions.append('image; line(' + x_label +', '+ top_y + ', ' + x_label + ', ' + bottom_y + ' ) # color=green ')
 				regions.append('image; text('+ x_label +', '+oh_label_y+') # color=green textangle=90 text={OH}')
-		if label_lines: #Label lines from a line list
+		if label_lines and spec_lines != '': #Label lines from a line list
 			show_lines = spec_lines.parse(min_wave, max_wave) #Only grab lines withen the wavelength range of the current order
 			num_lines = len(show_lines.wave)
 			x_labels = x_interp(show_lines.wave)
