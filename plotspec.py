@@ -38,6 +38,9 @@ from tynt import FilterGenerator
 from astropy.visualization import ImageNormalize, ZScaleInterval, LogStretch, SinhStretch, AsinhStretch, AsymmetricPercentileInterval
 from skimage import restoration
 
+from muler import igrins
+import gollum
+
 
 try:  #Try to import bottleneck library, this greatly speeds up things such as nanmedian, nanmax, and nanmin
 	from bottleneck import * #Library to speed up some numpy routines
@@ -510,7 +513,7 @@ def estimate_slit_troughput(std_date, wave_frameno, std_frameno, slit_length_arc
 	# #kernel = kernel / np.nansum(kernel)	
 
 	for order in range(n_orders):  #Estimate throughput for each order using the median between columns col1 and col2 and save the result and median wavelength in arrays
-		print('processing order ', order)
+		#print('processing order ', order)
 		flux2d = spec2d_list.orders[order].flux[:,col1:col2]
 		y = np.nanmedian(flux2d / np.nansum(np.abs(flux2d), axis=0), axis=1) #Median collapse normalized continuum columns between col1 and col2 to estimate the slit profile in each order
 		      
@@ -530,7 +533,7 @@ def estimate_slit_troughput(std_date, wave_frameno, std_frameno, slit_length_arc
 		if size(i_min) > 1:
 		    i_min = i_min[0]
 		#Fit 2 Moffat distributions to the psfs from A and B positions (see https://docs.astropy.org/en/stable/modeling/compound-models.html)
-		print('fitting distributions')
+		#print('fitting distributions')
 
 		g1 = models.Moffat1D(amplitude=y[i_max], x_0=x[i_max], alpha=1.0, gamma=1.0)
 		g2 = models.Moffat1D(amplitude=y[i_min], x_0=x[i_min], alpha=1.0, gamma=1.0)
@@ -538,8 +541,8 @@ def estimate_slit_troughput(std_date, wave_frameno, std_frameno, slit_length_arc
 		#fitter = fitting.SLSQPLSQFitter()
 		finite_values = np.isfinite(x) & np.isfinite(y)
 		gg_fit = fitter(g1 + g2, x[finite_values], y[finite_values])
-		#print('FWHM A beam:', gg_fit[0].fwhm)
-		#print('FWHM B beam:', gg_fit[1].fwhm)
+		print('FWHM A beam:', gg_fit[0].fwhm)
+		print('FWHM B beam:', gg_fit[1].fwhm)
 
 		g1_fit = models.Moffat2D(amplitude=(gg_fit[0].amplitude), x_0=gg_fit[0].x_0 - 0.5*slit_length_arcsec, alpha=gg_fit[0].alpha, gamma=gg_fit[0].gamma)
 		g2_fit = models.Moffat2D(amplitude=(gg_fit[1].amplitude), x_0=gg_fit[1].x_0 - 0.5*slit_length_arcsec, alpha=gg_fit[1].alpha, gamma=gg_fit[1].gamma)
@@ -587,7 +590,7 @@ def estimate_slit_troughput(std_date, wave_frameno, std_frameno, slit_length_arc
 					f_through_slit_for_this_order = 1.0
 				f_through_slit.append(f_through_slit_for_this_order)
 				wave.append(np.nanmean(spec2d_list.orders[order].wave[col1:col2]))
-		print('done with order ', order)
+		#print('done with order ', order)
 	f_through_slit = array(f_through_slit)
 	wave = array(wave)
 
@@ -1133,10 +1136,15 @@ class position_velocity:
 		pv = copy.deepcopy(self.pv)
 		if s2n_cut > 0.:
 			#g = Gaussian2DKernel(stddev=s2n_smooth)
-			g = Gaussian2DKernel(s2n_smooth)
-			for i in range(len(pv)):
-				low_s2n_mask = convolve(pv[i], g) / self.var2d[i]**0.5 < s2n_cut
-				pv[i][low_s2n_mask] = nan
+			if s2n_smooth > 0:
+				g = Gaussian2DKernel(s2n_smooth)
+				for i in range(len(pv)):
+					low_s2n_mask = convolve(pv[i], g) / self.var2d[i]**0.5 < s2n_cut
+					pv[i][low_s2n_mask] = nan
+			else:
+				for i in range(len(pv)):
+					low_s2n_mask = pv[i] / self.var2d[i]**0.5 < s2n_cut
+					pv[i][low_s2n_mask] = nan
 		if prange[0] == 0 and prange[1] == 0: #If user does not specify prange explicitely 
 			prange = [0, self.slit_pixel_length] #Set to use the whole slit by default
 		use_velocities = (self.velocity >= vrange[0]) & (self.velocity <= vrange[1]) #Find indicies within velocity range specified by the variable vrange and only at those pixels, masking everything outside that range out
@@ -1987,7 +1995,7 @@ def makespec(date, band, waveno, frameno, std=False, twodim=False, mask_cosmics=
 		try: #Try reading in fits file
 			wave_data = fits_file(date, waveno, band, wave_old=True) #If 1D, read in data from wavelength solution
 		except: #If no fits file is found, try reading in json file instead
-			filename = calib_path+str(date)+'/SDC'+band+'_'+str(date)+'_'+'%.4d' % int(frameno) +'.wvlsol_v1.json' #Set json file name
+			filename = calib_path+str(date)+'/SDC'+band+'_'+str(date)+'_'+'%.4d' % int(waveno) +'.wvlsol_v1.json' #Set json file name
 			with open(filename) as data_file:  #Read in Json file
 			    data = json.load(data_file)
 			wave_data = data['wvl_sol'] #Splice out the wavelength solution
@@ -3143,310 +3151,367 @@ class find_lines:
 
 
 
-def get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, savechecks=True):
+def get_flux_calibration(date, stdno, std, std_flattened, B, V, std_star_name, rv_shift, savechecks=True):
 
-	min_wavelength = 1000 #Get min wavelength in spectrum
-	max_wavelength = 30000 #Get max wavelength in spectrum
-	resolving_power = 45000.0 #IGRINS resolution
+	std_star_model_fits_filename = 'standard_stars/'+std_star_name+'_'+str(date)+'_'+str(stdno)+'.fits'
+	if not os.path.exists(std_star_model_fits_filename): #If fits file does not exist, do the fit to the standard star and then save it as a file
+		std_data = igrins.readPLP(pipeline_path, date, stdno)
+		std_model_synthetic_spectrum = std_data.fitStandardStar(name=std_star_name, plot=False)
+		std_model_synthetic_spectrum.write(std_star_model_fits_filename, format='tabular-fits')
+		#pickled_obj = pickle.dumps(std_model_synthetic_spectrum, protocol=pickle.HIGHEST_PROTOCOL) #Pickle and save file of resulting model              
+		#file = open(std_star_model_fits_filename, 'wb')
+		#file.write(pickled_obj)
+		#file.close()
+		# hdu0 = fits.PrimaryHDU()
+		# hdu1 = fits.ImageHDU(data=std_data.spctral_axis.micron, name='Wavelength')
+		# hdu2 = fits.ImageHDU(data=std_model_synthetic_spectrum, name='Flux')
+		# hdul = fits.HDUList([hdu0, hdu1, hdu2])
+		# hdul.writeto(std_star_model_fits_filename, overwrite=True)
+		# hdul.close()
+		# interp_std_flux = interp1d(std_model_synthetic_spectrum.spectral_axis.micron, std_model_synthetic_spectrum.flux)
+	else:
+		std_model_synthetic_spectrum = gollum.utilities.Spectrum1D.read(std_star_model_fits_filename, format='tabular-fits')
+		# file = open(std_star_model_fits_filename, 'rb')
+		# pickled_obj = file.read(pickled_obj)
+		# file.close()
+		# std_model_synthetic_spectrum = pickle.loads(pickled_obj)
+		# hdul = fits.open(std_star_model_fits_filename)
+		# interp_std_flux = interp1d(hdul[1].data, hdul[2].data)
+		# hdul.close()
 
-	extinction_model = GCC09_MWAvg() #Dust extinction model: https://dust-extinction.readthedocs.io/en/latest/api/dust_extinction.averages.G21_MWAvg.html#dust_extinction.averages.G21_MWAvg
+		#If fits file does exist, read it in
 
-	if std_star_name == '18Lep':
-		#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)
-		#From best fit photometry in Cardiel et al. (2021), Teff=9056, logg=3.867, z=-0.5
-		# fraction_a = 0.75
-		# native_resolution_template_a = PHOENIXSpectrum(teff=9000, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0)
-		# native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=3.5, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)
-	elif std_star_name == 'HD34317':
-		#From Teff and metallicities for Tycho-2 stars (Ammons+, 2006): Teff = 9296 K 
-		#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
-		#Freom Anders et al (2022): Teff = 9196, logg = 3.78, fe/h=0.208, Av=0.07 which if E(B-V) = Av/R where R=3.1 translates into a E(B-V) = 0.0226
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0)  * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0226)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=3.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0226)		
-		# fraction_a = 0.5
-		# native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		# native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
-	elif std_star_name == 'HR8422':
-		#From Gaia DR3 RV Template: Teff = 10000, logg=4.5, fe/h=0.25
-		#From Zorec et al. 2012: vsini=91 km/s, I found the rotational velocity to be lower when fitting the Br-gamma line.
-		#From Anders et al. (2022): Teff = 10217.59, logg = 3.798, fe/h = -0.395, Av= 0.0776 -> E(B-V)=0.025
-		fraction_a = 0.3
-		native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.025)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10400, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.025)	
-		# fraction_a = 0.5 
-		# native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		# native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
-	elif std_star_name == 'HR598':
-		#From Gaia DR3 gsphot: Teff = 10473.918, logg=4.2997, fe/h=-0.1595
-		#From Gaia DR3 RV Template: Teff = 9000, logg=4.5, fe/h=0.25
-		#From Anders et al. (2022): Teff = 9961, logg = 4.28, fe/h = -0.088, Av= 0.066949 -> E(B-V)=0.0216
-		fraction_a = 0.2
-		native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0216)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0216)		
-	elif std_star_name == 'HD205314':
-		## FIT BASED ON GAIA DR3 RV fit
-		# Teff = 10000
-		# logg = 4.5
-		# [Fe/H] = 0.25
-		# fraction_a = 0.5 
-		# native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		# native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)		
-		## Fit based on Gaia DR3 photometry fit
-		# Teff = 10470
-		# logg = 3.7715
-		# [Fe/H] = -0.7811
-		# fraction_a = 0.5				
-		# native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=3.5, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		# native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
-		# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)		
-		## BEST BY EYE FIT
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)				
-	elif std_star_name == 'HR7098':
-		#Fit based on Monier et al (2019)
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		#native_resolution_template_a = native_resolution_template_a.rotationally_broaden(0.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		#native_resolution_template_b = native_resolution_template_b.rotationally_broaden(0.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)				
-	elif std_star_name == 'HR6744':
-		#Values from Gaia DR3 RV fit
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(150.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift) 
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(150.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)	
-	elif std_star_name == 'HR7734':
-		#From Zorec 2012 https://vizier.cds.unistra.fr/viz-bin/VizieR-5?-ref=VIZ63892ff83017ac&-out.add=.&-source=J/A%2bA/537/A120/table1&recno=1729
-		# Teff = 9660 K
-		# vsini = 238 km/s
-		# ****These values from the literature don't fit the spectrum or magnitudes.....
-		# THIS STAR IS VERY STRANGE!  Core of Br-gamma line seems stronger than any of the models can fit, could it be chemically pecululiar?
-		# Absoltue Vmag = -0.676 (based in V mag from simbad and Gaia DR3 parallax distance) implying this star is actually spectral type A0III, a giant
-		# Lower surface gravity does indeed seem to provide a better fit, core of Br-gamma still not perfectly fit but will probably have to live with it.
-		# Values used are best fit "chi by eye"
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=8800, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(35.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(35.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)
-	elif std_star_name == 'HD184787':
-		#From Anders et al. (2022) Starhorse2: Teff = 9260, logg = 4.042, fe/h = -0.10, Av= 0.016538 -> E(B-V)=0.0053
-		fraction_a = 0.25
-		native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(175.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0053)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(175.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0053)		
-	elif std_star_name == 'HIP80019':
-		fraction_a = 0.5
-		#From Iglesias et la. (2003) Table 3 (https://vizier.cds.unistra.fr/viz-bin/VizieR-5?-ref=VIZ647104af2c735&-out.add=.&-source=J/MNRAS/519/3958/table3&recno=137) 
-		# Teff = 10500, logg=4.4, vsini=160, Av=1.08
-		native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=1.57*(B-V))
-		native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=1.57*(B-V))
-	elif std_star_name == 'HD29526':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=12000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=1.57*(B-V))
-		native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=1.57*(B-V))
-	elif std_star_name == '18Ori':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=(B-V))
-		native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=(B-V))
-	elif std_star_name == 'HD25175':
-		fraction_a = 0.65
-		native_resolution_template_a = PHOENIXSpectrum(teff=8800, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift+50.0)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.03)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+50.0)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.03)
-	elif std_star_name == 'HD7215': #This is a spectroscopic binary, hopefully it doesn't screw anything up
-		fraction_a = 0.60
-		native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(45.0)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(45.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-	elif std_star_name == 'HD184195':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
-	elif std_star_name == 'HR4187':
-		fraction_a = 0.75
-		rv_shift = -16.0
-		native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(5.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(5.0)
-	elif std_star_name == 'HR3039':
-		fraction_a = 0.6
-		native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
-	elif std_star_name == 'Tet Lep':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(200.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(200.0)
-	elif std_star_name == 'HD218045':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=11000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=11000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
-	elif std_star_name == 'HD37887':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=5.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
-	elif std_star_name == 'HR2584':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
-	elif std_star_name == 'HR2315':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
-	elif std_star_name == 'HR9019':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(30.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(30.0)
-	elif std_star_name == 'ktau':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(75.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(75.0)
-	# elif std_star_name == 'kapand': #Kappa And or HR 8976
+	
+
+	# min_wavelength = 1000 #Get min wavelength in spectrum
+	# max_wavelength = 30000 #Get max wavelength in spectrum
+	# resolving_power = 45000.0 #IGRINS resolution
+
+	# extinction_model = GCC09_MWAvg() #Dust extinction model: https://dust-extinction.readthedocs.io/en/latest/api/dust_extinction.averages.G21_MWAvg.html#dust_extinction.averages.G21_MWAvg
+
+	# if std_star_name == '18Lep':
+	# 	#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
 	# 	fraction_a = 0.5
-	# 	native_resolution_template_a = PHOENIXSpectrum(teff=12000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)
+	# 	#From best fit photometry in Cardiel et al. (2021), Teff=9056, logg=3.867, z=-0.5
+	# 	# fraction_a = 0.75
+	# 	# native_resolution_template_a = PHOENIXSpectrum(teff=9000, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(125.0)
+	# 	# native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=3.5, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(125.0)
+	# elif std_star_name == 'HD34317':
+	# 	#From Teff and metallicities for Tycho-2 stars (Ammons+, 2006): Teff = 9296 K 
+	# 	#From RV template in Gaia DR3: Teff = 10500, logg=4.5, fe/h=0.25
+	# 	#Freom Anders et al (2022): Teff = 9196, logg = 3.78, fe/h=0.208, Av=0.07 which if E(B-V) = Av/R where R=3.1 translates into a E(B-V) = 0.0226
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0)  * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0226)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=3.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0226)		
+	# 	# fraction_a = 0.5
+	# 	# native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	# native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
+	# elif std_star_name == 'HR8422':
+	# 	#From Gaia DR3 RV Template: Teff = 10000, logg=4.5, fe/h=0.25
+	# 	#From Zorec et al. 2012: vsini=91 km/s, I found the rotational velocity to be lower when fitting the Br-gamma line.
+	# 	#From Anders et al. (2022): Teff = 10217.59, logg = 3.798, fe/h = -0.395, Av= 0.0776 -> E(B-V)=0.025
+	# 	fraction_a = 0.3
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.025)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10400, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.025)	
+	# 	# fraction_a = 0.5 
+	# 	# native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	# native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)#* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B)		
+	# elif std_star_name == 'HR598':
+	# 	#From Gaia DR3 gsphot: Teff = 10473.918, logg=4.2997, fe/h=-0.1595
+	# 	#From Gaia DR3 RV Template: Teff = 9000, logg=4.5, fe/h=0.25
+	# 	#From Anders et al. (2022): Teff = 9961, logg = 4.28, fe/h = -0.088, Av= 0.066949 -> E(B-V)=0.0216
+	# 	fraction_a = 0.2
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0216)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0216)		
+	# elif std_star_name == 'HD205314':
+	# 	## FIT BASED ON GAIA DR3 RV fit
+	# 	# Teff = 10000
+	# 	# logg = 4.5
+	# 	# [Fe/H] = 0.25
+	# 	# fraction_a = 0.5 
+	# 	# native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	# native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)		
+	# 	## Fit based on Gaia DR3 photometry fit
+	# 	# Teff = 10470
+	# 	# logg = 3.7715
+	# 	# [Fe/H] = -0.7811
+	# 	# fraction_a = 0.5				
+	# 	# native_resolution_template_a = PHOENIXSpectrum(teff=10400, logg=3.5, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	# native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	# native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.0, Z=-0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength)
+	# 	# native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	# native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)		
+	# 	## BEST BY EYE FIT
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)				
+	# elif std_star_name == 'HR7098':
+	# 	#Fit based on Monier et al (2019)
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	#native_resolution_template_a = native_resolution_template_a.rotationally_broaden(0.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	#native_resolution_template_b = native_resolution_template_b.rotationally_broaden(0.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)				
+	# elif std_star_name == 'HR6744':
+	# 	#Values from Gaia DR3 RV fit
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(150.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.5, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift) 
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(150.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)	
+	# elif std_star_name == 'HR7734':
+	# 	#From Zorec 2012 https://vizier.cds.unistra.fr/viz-bin/VizieR-5?-ref=VIZ63892ff83017ac&-out.add=.&-source=J/A%2bA/537/A120/table1&recno=1729
+	# 	# Teff = 9660 K
+	# 	# vsini = 238 km/s
+	# 	# ****These values from the literature don't fit the spectrum or magnitudes.....
+	# 	# THIS STAR IS VERY STRANGE!  Core of Br-gamma line seems stronger than any of the models can fit, could it be chemically pecululiar?
+	# 	# Absoltue Vmag = -0.676 (based in V mag from simbad and Gaia DR3 parallax distance) implying this star is actually spectral type A0III, a giant
+	# 	# Lower surface gravity does indeed seem to provide a better fit, core of Br-gamma still not perfectly fit but will probably have to live with it.
+	# 	# Values used are best fit "chi by eye"
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=8800, logg=3.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(35.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=B-V)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(35.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=B-V)
+	# elif std_star_name == 'HD184787':
+	# 	#From Anders et al. (2022) Starhorse2: Teff = 9260, logg = 4.042, fe/h = -0.10, Av= 0.016538 -> E(B-V)=0.0053
+	# 	fraction_a = 0.25
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(175.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.0053)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(175.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.0053)		
+	# elif std_star_name == 'HIP80019':
+	# 	fraction_a = 0.5
+	# 	#From Iglesias et la. (2003) Table 3 (https://vizier.cds.unistra.fr/viz-bin/VizieR-5?-ref=VIZ647104af2c735&-out.add=.&-source=J/MNRAS/519/3958/table3&recno=137) 
+	# 	# Teff = 10500, logg=4.4, vsini=160, Av=1.08
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=1.57*(B-V))
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(80.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=1.57*(B-V))
+	# elif std_star_name == 'HD29526':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=12000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=1.57*(B-V))
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=1.57*(B-V))
+	# elif std_star_name == '18Ori':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift-0.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=(B-V))
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+0.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=(B-V))
+	# elif std_star_name == 'HD25175':
+	# 	fraction_a = 0.65
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=8800, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift+50.0)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.03)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift+50.0)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(40.0) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.03)
+	# elif std_star_name == 'HD7215': #This is a spectroscopic binary, hopefully it doesn't screw anything up
+	# 	fraction_a = 0.60
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(45.0)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(45.0) #* extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# elif std_star_name == 'HD184195':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift) * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift) * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
+	# elif std_star_name == 'HR4187':
+	# 	fraction_a = 0.75
+	# 	rv_shift = -16.0
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(5.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(5.0)
+	# elif std_star_name == 'HR3039':
+	# 	fraction_a = 0.6
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
 	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
 	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
-	# 	native_resolution_template_b = PHOENIXSpectrum(teff=12000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
 	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
 	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
-	elif std_star_name == 'HR2250':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(60.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=10400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(60.0)
-	elif std_star_name == 'HR945':
-		fraction_a = 0.5
-		native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
-		native_resolution_template_a = native_resolution_template_a.rotationally_broaden(25.0)
-		native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
-		native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
-		native_resolution_template_b = native_resolution_template_b.rotationally_broaden(25.0)
-	else: # the underscore character is used as a catch-all.
-		raise Exception('The standard star name '+std_star_name+' does not match known standard stars.')
+	# elif std_star_name == 'Tet Lep':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(200.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(200.0)
+	# elif std_star_name == 'HD218045':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=11000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=11000, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
+	# elif std_star_name == 'HD37887':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=5.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
+	# elif std_star_name == 'HR2584':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(50.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(50.0)
+	# elif std_star_name == 'HR2315':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
+	# elif std_star_name == 'HR9019':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(30.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(30.0)
+	# elif std_star_name == 'ktau':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(75.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9600, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(75.0)
+	# # elif std_star_name == 'kapand': #Kappa And or HR 8976
+	# # 	fraction_a = 0.5
+	# # 	native_resolution_template_a = PHOENIXSpectrum(teff=12000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# # 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# # 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(100.0)
+	# # 	native_resolution_template_b = PHOENIXSpectrum(teff=12000, logg=4.0, Z=-1.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# # 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# # 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(100.0)
+	# elif std_star_name == 'HR2250':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10200, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(60.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(60.0)
+	# elif std_star_name == 'HR945':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(25.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9400, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(25.0)
+	# elif std_star_name == 'HR1578':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=9800, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(145.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=9800, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(145.0)
+	# elif std_star_name == 'HD53205':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(35.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(35.0)
+	# elif std_star_name == 'HR2133':
+	# 	fraction_a = 0.5
+	# 	native_resolution_template_a = PHOENIXSpectrum(teff=10800, logg=4.0, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_a = native_resolution_template_a.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_a.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_a = native_resolution_template_a.rotationally_broaden(35.0)
+	# 	native_resolution_template_b = PHOENIXSpectrum(teff=10800, logg=4.5, Z=0.0, path=path_to_pheonix_models, wl_lo=min_wavelength, wl_hi=max_wavelength, download=True)
+	# 	native_resolution_template_b = native_resolution_template_b.rv_shift(rv_shift)# * extinction_model.extinguish(native_resolution_template_b.spectral_axis, Ebv=0.04)
+	# 	native_resolution_template_b = native_resolution_template_b.rotationally_broaden(35.0)
 
 
-	native_resolution_template_a = native_resolution_template_a.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
-	native_resolution_template_b = native_resolution_template_b.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
 
-	std_model_synthetic_spectrum = LinInterpResampler(native_resolution_template_a, native_resolution_template_a.spectral_axis)*(fraction_a)*1e-8 + LinInterpResampler(native_resolution_template_b, native_resolution_template_a.spectral_axis)*(1.0-  fraction_a)*1e-8 #1e-8 scales flux from cm^-1 to angstrom^-1
-	#std_model_synthetic_spectrum = LinInterpResampler(std_model_synthetic_spectrum, input_spectrum.spectral_axis)
+	# else: # the underscore character is used as a catch-all.
+	# 	raise Exception('The standard star name '+std_star_name+' does not match known standard stars.')
+
+
+	# native_resolution_template_a = native_resolution_template_a.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
+	# native_resolution_template_b = native_resolution_template_b.instrumental_broaden(resolving_power=resolving_power) #Degrade synthetic spec resolution to instrumental resolution
+
+	# std_model_synthetic_spectrum = LinInterpResampler(native_resolution_template_a, native_resolution_template_a.spectral_axis)*(fraction_a)*1e-8 + LinInterpResampler(native_resolution_template_b, native_resolution_template_a.spectral_axis)*(1.0-  fraction_a)*1e-8 #1e-8 scales flux from cm^-1 to angstrom^-1
+	# #std_model_synthetic_spectrum = LinInterpResampler(std_model_synthetic_spectrum, input_spectrum.spectral_axis)
 	
-	interp_std_flux = interp1d(std_model_synthetic_spectrum.spectral_axis.micron, std_model_synthetic_spectrum.flux)
+	#interp_std_flux = interp1d(std_model_synthetic_spectrum.spectral_axis.micron, std_model_synthetic_spectrum.flux)
 
 	# #normalize synthetic spectrum to its magnitude in the V band
 	# tcurve_wave, tcurve_trans = loadtxt(path_to_pheonix_models + '/2MASS_transmission_curves/'+bands[i]+'.dat', unpack=True) #Read in 2MASS band filter transmission curve
@@ -3466,6 +3531,7 @@ def get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, save
 	x = arange(0.0, 3.0, 1e-7)
 	delta_lambda = abs(x[1]-x[0])
 	tcurve_resampled = tcurve_interp(x)
+	tcurve_resampled[tcurve_resampled < 0] = 0
 	resampled_synthetic_spectrum =  LinInterpResampler(std_model_synthetic_spectrum , x*u.um).flux.value
 	f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
 	#magnitude = -2.5 * log10(f_lambda / f0_lambda)# - (0.03 - V)
@@ -3515,6 +3581,7 @@ def get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, save
 		#tcurve_trans[tcurve_trans < 0] = 0.0 #Zero out negative values
 		tcurve_interp = interp1d(tcurve_wave, tcurve_trans, kind='cubic', fill_value=0.0, bounds_error=False) #Create interp obj for the transmission curve
 		tcurve_resampled =  tcurve_interp(x)
+		tcurve_resampled[tcurve_resampled < 0] = 0
 		f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
 		magnitude = -2.5 * log10(f_lambda / f0_lambda[i])# - (0.03 - V)
 		print('For band '+bands[i]+' the estimated magnitude for '+std_star_name+': '+str(magnitude))
@@ -3528,6 +3595,7 @@ def get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, save
 		filt = f.reconstruct('2MASS/2MASS.'+bands[i])
 		tcurve_interp = interp1d(filt.wavelength.to('um'), filt.transmittance, kind='cubic', fill_value=0.0, bounds_error=False) #Create interp obj for the transmission curve
 		tcurve_resampled = tcurve_interp(x)
+		tcurve_resampled[tcurve_resampled < 0] = 0
 		f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
 		magnitude = -2.5 * log10(f_lambda / f0_lambda[i])# - (0.03 - V)
 		print('For band '+bands[i]+' the estimated magnitude is '+str(magnitude))
@@ -3539,6 +3607,7 @@ def get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, save
 		filt = f.reconstruct('Generic/Johnson.'+bands[i])
 		tcurve_interp = interp1d(filt.wavelength.to('um'), filt.transmittance, kind='cubic', fill_value=0.0, bounds_error=False) #Create interp obj for the transmission curve
 		tcurve_resampled = tcurve_interp(x)
+		tcurve_resampled[tcurve_resampled < 0] = 0
 		f_lambda = nansum(resampled_synthetic_spectrum * tcurve_resampled * x * delta_lambda) / nansum(tcurve_resampled * x * delta_lambda)
 		magnitude = -2.5 * log10(f_lambda / f0_lambda[i])# - (0.03 - V)
 		print('For band '+bands[i]+' the estimated magnitude is '+str(magnitude))
@@ -3606,7 +3675,7 @@ def process_standard_star_with_phoenix_model(date, frameno, stdno, sci, std, std
 	if i != -1:
 		relative_flux_calibration = standard_stars[i].relative_flux_calibration
 	else:
-		relative_flux_calibration = get_flux_calibration(std, std_flattened, B, V, std_star_name, rv_shift, savechecks=savechecks)
+		relative_flux_calibration = get_flux_calibration(date, stdno, std, std_flattened, B, V, std_star_name, rv_shift, savechecks=savechecks)
 		new_standard_star = Standard_Star()
 		new_standard_star.date = date
 		new_standard_star.frameno = stdno
